@@ -4,7 +4,7 @@
 -module(e4_j1c).
 
 %% API
--export([compile/2]).
+-export([compile/2, format_j1c_pass1/4]).
 -include("e4_forth.hrl").
 -include("e4_j1.hrl").
 -import(e4, [compile_error/1, compile_error/2]).
@@ -145,7 +145,7 @@ prog_loop_pop(Prog0 = #j1prog{loopstack=[LSTop | LoopStack]}) ->
     {Prog0#j1prog{loopstack=LoopStack}, LSTop}.
 
 %% @doc Push PC onto cond stack + write j1patch{id=PC} in the output
-emit_patch(Prog0 = #j1prog{pc=PC}, Op) ->
+emit_patch(Prog0 = #j1prog{pc=PC}, <<Op:16>>) ->
     Prog1 = prog_cond_push(Prog0),
     emit(Prog1, #j1patch{op=Op, id=PC}).
 
@@ -229,6 +229,7 @@ emit_alu(Prog = #j1prog{}, #alu{op=Op0, tn=TN, rpc=RPC, tr=TR, nti=NTI,
             Rs:2, Ds:2>>,
     emit(Prog, Op1).
 
+-spec emit_base_word(j1prog(), binary() | integer()) -> j1prog().
 emit_base_word(Prog0, <<"+">>) ->
     emit_alu(Prog0, #alu{op=?J1OP_T_PLUS_N, ds=-1});
 emit_base_word(Prog0, <<"XOR">>) ->
@@ -386,6 +387,7 @@ format_j1c_pass1(Prog, Pc, [H | Tail], Accum) ->
         io_lib:format("~4.16.0B: ", [Pc]) | Accum
     ]).
 
+format_j1c_op(Prog, Op) when is_integer(Op) -> format_j1c_op(Prog, <<Op:16>>);
 format_j1c_op(Prog, #j1patch{op=Op, id=Id}) ->
     io_lib:format("~s id=~p (~s)~n", [color:yellowb("PATCH"), Id,
                                       format_j1c_op(Prog, Op)]);
@@ -453,7 +455,7 @@ whereis_addr(#j1prog{dict_nif=Nifs}, Addr) when Addr < 0 ->
 
 %% @doc Additional pass resolves #j1patch inserts from PatchTab
 apply_patches([], _PatchTab, Accum) -> lists:reverse(Accum);
-apply_patches([#j1patch{op= <<Op:16>>, id=Id} | Tail], PatchTab, Accum) ->
+apply_patches([#j1patch{op=Op, id=Id} | Tail], PatchTab, Accum) ->
     Addr = orddict:fetch(Id, PatchTab),
     NewOp = <<(Op bor Addr):16>>,
     apply_patches(Tail, PatchTab, [NewOp | Accum]);

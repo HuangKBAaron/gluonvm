@@ -38,8 +38,8 @@
     rpc = 0 :: 0..1,    % copy R (return stack top) to PC (program counter)
     tr = 0 :: 0..1,     % copy T (stack top) to R (return stack top)
     nti = 0 :: 0..1,    % indexed RAM access N->[T]
-    ds = 0 :: 0..3,     % 2 bits, signed increment of data stack
-    rs = 0 :: 0..3      % 2 bits, signed increment of return stack
+    ds = 0 :: -1..2,     % 2 bits, signed increment of data stack -1=2,0,1
+    rs = 0 :: -1..2      % 2 bits, signed increment of return stack
 }).
 -type alu() :: #alu{}.
 
@@ -76,7 +76,7 @@
     atoms = orddict:new() :: orddict:orddict(binary(), integer()),
 
     pc = 0 :: integer(),
-    output = [] :: iolist()
+    output = [] :: [binary() | j1patch()]
 }).
 -type j1prog() :: #j1prog{}.
 

@@ -43,8 +43,11 @@ start_e4_compiler([F | Tail]) ->
     end,
     start_e4_compiler(Tail).
 
-compile_error(Format) -> compile_error(Format, []).
+-spec compile_error(string()) -> none().
+compile_error(Message) ->
+    erlang:error(Message).
 
+-spec compile_error(string(), [any()]) -> none().
 compile_error(Format, Args) ->
     E = lists:flatten(io_lib:format(Format, Args)),
     erlang:error(E).
