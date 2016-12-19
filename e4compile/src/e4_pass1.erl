@@ -118,28 +118,28 @@ process_code(Block0, #c_let{vars=Vars, arg=Arg, body=Body}) ->
 
 process_code(Block0, #c_apply{op=Op, args=Args}) ->
     emit(Block0,
-         lists:reverse(lists:map(fun e4_f:retrieve/1, Args)) ++ [
+         lists:reverse(lists:map(fun e4_f:evaluate/1, Args)) ++ [
              e4_f:lit(length(Args)),
-             e4_f:retrieve(Op),
+             e4_f:evaluate(Op),
              <<".APPLY">>
         ]
     );
 
 process_code(Block0, #c_call{module=M, name=N, args=Args}) ->
     emit(Block0,
-         lists:reverse(lists:map(fun e4_f:retrieve/1, Args)) ++ [
-            [e4_f:make_mfarity(e4_f:retrieve(M), e4_f:retrieve(N),
-                                length(Args))]
+         lists:reverse(lists:map(fun e4_f:evaluate/1, Args)) ++ [
+            [e4_f:make_mfarity(e4_f:evaluate(M), e4_f:evaluate(N),
+                               length(Args))]
          ]);
 
 process_code(Block0, #c_primop{name=Name, args=Args}) ->
-    emit(Block0, lists:reverse(lists:map(fun e4_f:retrieve/1, Args))
+    emit(Block0, lists:reverse(lists:map(fun e4_f:evaluate/1, Args))
 %%                 ++ [e4_f:retrieve(Name), <<"PRIMOP">>]
         ++ [e4_f:primop(Name, length(Args))]
     );
 
 process_code(Block0, #c_tuple{es=Es}) ->
-    emit(Block0, e4_f:tuple(lists:map(fun e4_f:retrieve/1, Es)));
+    emit(Block0, e4_f:tuple(lists:map(fun e4_f:evaluate/1, Es)));
 
 process_code(Block0, #c_cons{hd=H, tl=T}) ->
     emit(Block0, ['?cons', H, T]);
@@ -216,7 +216,7 @@ pattern_match_pairs(Block0 = #f_block{scope=Scope0}, #f_var{}=Lhs, Rhs) ->
     case var_exists(Block0, Lhs) of % if have variable in scope
         true -> % variable exists, so read it and compare
             emit(Block0, [
-                e4_f:match_two_values(e4_f:retrieve(Lhs), Rhs),
+                e4_f:match_two_values(e4_f:evaluate(Lhs), Rhs),
                 e4_f:comment("match two known")
             ]);
         false -> % introduce variable and use it
@@ -226,7 +226,7 @@ pattern_match_pairs(Block0 = #f_block{scope=Scope0}, #f_var{}=Lhs, Rhs) ->
 pattern_match_pairs(Block0, #c_literal{val=LhsLit}, Rhs) ->
     emit(Block0, e4_f:match_two_values(
         e4_f:lit(LhsLit),
-        e4_f:retrieve(Rhs)
+        e4_f:evaluate(Rhs)
     ));
 pattern_match_pairs(Block0 = #f_block{}, #c_tuple{es=LhsElements}, Rhs) ->
     pattern_match_tuple_versus(Block0, LhsElements, Rhs);
@@ -257,24 +257,35 @@ pattern_match_var_versus(Block0, Lhs, #c_var{name=RhsName}) -> % unwrap right
     pattern_match_var_versus(Block0, Lhs, e4_f:var(RhsName));
 
 pattern_match_var_versus(Block0, #f_var{} = Lhs, Rhs) ->
-    case var_exists(Block0, Lhs) of
+    case is_variable(Lhs) andalso var_exists(Block0, Lhs) of
         true -> % var exists, so compare
             emit(Block0, [
                 e4_f:comment("compare-match ~p = ~p", [Lhs, Rhs]),
                 e4_f:unless(
-                    [e4_f:equals(e4_f:retrieve(Lhs), e4_f:retrieve(Rhs))],
+                    [e4_f:equals(e4_f:evaluate(Lhs),
+                                 e4_f:evaluate(Rhs))],
                     e4_f:block([<<"ERROR-BADMATCH">>])
                 )
                 %% TODO: Use fail label instead of badmatch if possible
             ]);
-        false -> % var did not exist, so copy-assign
-            Block1 = emit(Block0, [
-                e4_f:comment("assign-match ~s = ~s",
-                    [
-                        format_vars([Lhs]), format_vars([Rhs])
-                    ]),
-                e4_f:mark_alias(Lhs, Rhs)
-            ]),
+        false -> % var did not exist
+            Block1 = case Rhs of
+                         #f_var{} ->
+                             %% if the right is variable too - this is an alias
+                             emit(Block0, [
+                                 e4_f:comment("assign-match ~s = ~s",
+                                              [format_vars([Lhs]),
+                                               format_vars([Rhs])]),
+                                 e4_f:mark_alias(Lhs, Rhs)
+                             ]);
+                         _ ->
+                             %% otherwise this is an assignment
+                             emit(Block0, [
+                                 e4_f:evaluate(Rhs),
+                                 e4_f:mark_new_var(Lhs),
+                                 e4_f:store(Lhs)
+                             ])
+                     end,
             scope_add_var(Block1, Lhs)
     end;
 pattern_match_var_versus(_Blk, L, R) ->
@@ -290,7 +301,7 @@ pattern_match_tuple_versus(Block0, LhsElements, Rhs) ->
     %% check that Rhs is a tuple
     Block1 = emit(Block0, [
         e4_f:unless(
-            [e4_f:retrieve(Rhs),
+            [e4_f:evaluate(Rhs),
              e4_f:lit(length(LhsElements)),
              <<".IS-TUPLE">>],
             e4_f:block([<<"ERROR-BADARG">>])
@@ -307,7 +318,7 @@ pattern_match_tuple_versus(Block0, LhsElements, Rhs) ->
             ]),
             pattern_match_var_versus(Blk1, Lhs1, #f_stacktop{})
         end,
-        emit(Block1, [e4_f:retrieve(Rhs)]),
+        emit(Block1, [e4_f:evaluate(Rhs)]),
         LhsPairs).
 %%pattern_match_tuple_versus(_State, _Lhs, Rhs) ->
 %%    compile_error("E4Cerl: Match tuple vs ~9999p is not implemented", [Rhs]).
@@ -372,12 +383,16 @@ str(X) -> lists:flatten(io_lib:format("~p", [X])).
 scope_add_var(Block = #f_block{scope=Scope}, Var) ->
     Block#f_block{scope=ordsets:add_element(Var, Scope)}.
 
+format_vars(Vars) when is_list(Vars) ->
+    Names = lists:map(fun format_vars/1, Vars),
+    string:join(Names, ", ");
+format_vars(#c_apply{op=Op, args=Args}) ->
+    io_lib:format("APPLY(~p, ~s)", [Op, format_vars(Args)]);
 format_vars(#c_values{es=Vars}) -> format_vars(Vars);
-format_vars(Vars) ->
-    Names = lists:map(
-        fun(#f_var{name=N}) -> atom_to_list(N);
-           (#c_var{name=N}) -> atom_to_list(N);
-            (#f_stacktop{}) -> "$stack-top"
-        end,
-        Vars),
-    string:join(Names, ", ").
+format_vars(#f_var{name=N}) -> atom_to_list(N);
+format_vars(#c_var{name=N}) -> atom_to_list(N);
+format_vars(#f_stacktop{}) -> "$stack-top".
+
+is_variable(#c_var{}) -> true;
+is_variable(#f_var{}) -> true;
+is_variable(_) -> false.

@@ -3,7 +3,7 @@
 %% API
 -export([
     'and'/1, 'if'/2, 'if'/3, block/0, block/1, block/3, block/4, comment/1,
-    comment/2, equals/2, lit/1, match_two_values/2, nil/0, retrieve/1,
+    comment/2, equals/2, lit/1, match_two_values/2, nil/0, evaluate/1,
     store/1, tuple/1, var/1, element/2, unless/2, mark_alias/2,
     mark_new_var/1, mark_new_arg/1, make_mfarity/3, primop/2, include/1
 ]).
@@ -58,7 +58,7 @@ unless(Cond, Body = #f_block{}) ->
 %% and constructs a tuple of that size
 tuple(Values) ->
     [
-        lists:reverse(lists:map(fun retrieve/1, Values)),
+        lists:reverse(lists:map(fun evaluate/1, Values)),
         lit(length(Values)),
         <<".MAKE-TUPLE">>
     ].
@@ -69,7 +69,7 @@ equals(Lhs, Rhs) -> [Lhs, Rhs, <<"==">>].
 %% ( X Y -- X , if X==Y, otherwise badmatch error )
 match_two_values(L, R) ->
     [   % TODO: move to core.fs
-        retrieve(L), <<"DUP">>, retrieve(R), <<"==">>,
+        evaluate(L), <<"DUP">>, evaluate(R), <<"==">>,
         <<"UNLESS">>, <<"ERROR-BADMATCH">>, <<"THEN">>
     ].
 
@@ -111,36 +111,43 @@ mark_alias(Var = #f_var{}, Existing = #f_var{}) ->
 mark_alias(Existing = #f_var{}, #f_stacktop{}) ->
     [<<"DUP">>, store(Existing)].
 
-%% ( -- X , retrieves value of variable V and leaves it on stack )
-retrieve(#c_tuple{es=Es}) -> tuple(Es);
-retrieve(#c_apply{op=FunObj, args=Args}) ->
+%% ( -- X , retrieves value of variable V or inserts an expression result )
+%% ASSUMPTION: that expression will not grow the stack
+evaluate(#c_call{module=M, name=N, args=Args}) ->
+    #f_call{mod=M, fn=N, args=lists:map(fun evaluate/1, Args)};
+evaluate(#c_tuple{es=Es}) -> tuple(Es);
+evaluate(#c_apply{op=FunObj, args=Args}) ->
     #f_apply{
-        funobj=retrieve(FunObj),
-        args=lists:map(fun retrieve/1, Args)
+        funobj=evaluate(FunObj),
+        args=lists:map(fun evaluate/1, Args)
     };
-retrieve(#f_apply{}=A) -> A;
-retrieve(I) when is_integer(I) -> lit(I);
-retrieve(#f_stacktop{}) -> [];
-retrieve(Retr = #f_ld{}) -> Retr;
-retrieve(Lit = #f_lit{}) -> Lit;
-retrieve(#c_literal{val=Lit}) -> lit(Lit);
-retrieve(#c_var{name={F, A}}) when is_atom(F), is_integer(A) ->
+evaluate(#f_apply{} = A) -> A;
+evaluate(I) when is_integer(I) -> lit(I);
+evaluate(#f_stacktop{}) -> [];
+evaluate(Retr = #f_ld{}) -> Retr;
+evaluate(Lit = #f_lit{}) -> Lit;
+evaluate(#c_literal{val=Lit}) -> lit(Lit);
+evaluate(#c_var{name={F, A}}) when is_atom(F), is_integer(A) ->
     #f_mfa{mod='.', fn=F, arity=A};
-retrieve(#c_var{name=Var}) -> #f_ld{var=Var};
-retrieve(Var = #f_var{}) -> #f_ld{var=Var}.
+evaluate(#c_var{name=Var}) -> #f_ld{var=Var};
+evaluate(Var = #f_var{}) -> #f_ld{var=Var};
+evaluate(OtherCode) ->
+    block([comment("begin eval")],
+        OtherCode,
+        [comment("end eval")]).
 
 var(#c_var{name=Name}) -> #f_var{name=Name};
 var(#f_var{}=CF) -> CF;
 var(Name) when is_atom(Name) -> #f_var{name=Name}.
 
 mark_new_var(#c_var{}=V) -> #f_decl_var{var=var(V)};
-mark_new_var(#f_var{}=V) -> #f_decl_var{var=var(V)};
-mark_new_var(Name) -> #f_decl_var{var=var(Name)}.
+mark_new_var(#f_var{}=V) -> #f_decl_var{var=var(V)}.
+%%mark_new_var(Name) -> #f_decl_var{var=var(Name)}.
 
 mark_new_arg(#f_var{}=V) -> #f_decl_arg{var=var(V)}.
 
 element(Index, Tuple) ->
-    [retrieve(Tuple), retrieve(Index), <<".GET-ELEMENT">>].
+    [evaluate(Tuple), evaluate(Index), <<".GET-ELEMENT">>].
 
 make_mfarity(M, F, Arity) when is_atom(F), is_atom(F) ->
     #f_mfa{mod=M, fn=F, arity=Arity};

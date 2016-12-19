@@ -1,6 +1,9 @@
+# Name the module which is used for test compilation
+TESTMODULE=gb_trees
+
 .PHONY: run
 run:
-	rebar3 compile && ./e4c.sh priv/test1.erl
+	rebar3 compile && ./e4c.sh priv/$(TESTMODULE).erl
 
 .PHONY: dialyze
 dialyze:

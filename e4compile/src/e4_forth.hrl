@@ -58,6 +58,10 @@
 -type f_stacktop() :: #f_stacktop{}.
 
 -record(f_apply, {funobj, args=[]}).
+-type f_apply() :: #f_apply{}.
+
+-record(f_call, {mod :: atom(), fn :: atom(), args=[]}).
+-type f_call() :: #f_call{}.
 
 %% introduce a new variable (produces no code, but allocates storage in a
 %% further pass)
