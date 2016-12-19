@@ -22,10 +22,13 @@ bin_filename(F) ->
     RDot = string:rchr(F, $.),
     string:sub_string(F, 1, RDot) ++ "4bin".
 
+encode_varlength_iolist_z(L) ->
+    [e4_encode:varint(iolist_size(L)), zlib:gzip(L)].
+
 encode_literals(LitTab) ->
     LitTab1 = lists:keysort(2, LitTab),
     LitTab2 = [term_to_binary(Val) || {Val, _Index} <- LitTab1],
-    Enc1 = [e4_encode:varint(iolist_size(LitTab2)), zlib:gzip(LitTab2)],
+    Enc1 = encode_varlength_iolist_z(LitTab2),
     iolist_to_binary(Enc1).
 
 encode_atoms(AtomTab) ->
@@ -34,9 +37,9 @@ encode_atoms(AtomTab) ->
             <<(e4_encode:varint(byte_size(Str)))/binary, Str/binary>>
         end,
     AtomTab2 = [EncodeAtom(Val) || {Val, _Index} <- AtomTab1],
-    Enc1 = [e4_encode:varint(iolist_size(AtomTab2)), zlib:gzip(AtomTab2)],
+    Enc1 = encode_varlength_iolist_z(AtomTab2),
     iolist_to_binary(Enc1).
 
 encode_code(Code) ->
-    Code2 = [e4_encode:varint(iolist_size(Code)), zlib:gzip(Code)],
+    Code2 = encode_varlength_iolist_z(Code),
     iolist_to_binary(Code2).
