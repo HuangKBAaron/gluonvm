@@ -7,30 +7,25 @@
     emit/2, format_core_forth/2]).
 
 -include_lib("compiler/src/core_parse.hrl").
+-include("e4_kernel_erl.hrl").
 -include("e4_forth.hrl").
 
 -import(e4, [compile_error/2]).
 
--type cerl_lhs() :: #c_literal{} | #c_var{} | #c_tuple{}. % TODO: binary, map
--type cerl_rhs() :: cerl_lhs().
--type cerl_ast_element() :: #c_literal{} | #c_alias{} | #c_apply{} | #c_binary{}
-    | #c_bitstr{} | #c_call{} | #c_case{} | #c_catch{} | #c_clause{}
-    | #c_cons{} | #c_fun{} | #c_let{} | #c_letrec{} | #c_map{} | #c_map_pair{}
-    | #c_module{} | #c_primop{} | #c_receive{} | #c_seq{} | #c_try{}
-    | #c_tuple{} | #c_values{} | #c_var{}.
--type cerl_ast() :: cerl_ast_element() | [cerl_ast_element()].
--type cerl_module() :: #c_module{}.
-
 module_new() -> #f_mod_pass1{}.
 
--spec process(cerl_module()) -> f_block().
-process(#c_module{name=_Name, exports=_Exps, defs=Defs}) ->
-    %M0 = #e4module{module=Name#c_literal.val},
-    Block = e4_f:block(
-        [e4_f:comment("begin mod"), e4_f:include("forth-lib/e4core.fs")],
+-spec process(k_mdef()) -> f_block().
+process(#k_mdef{name=Name, exports=_Exps, attributes=_Attr, body=Body}) ->
+    Block0 = e4_f:block(
+        [
+            e4_f:comment("begin mod"),
+            e4_f:include("forth-lib/e4core.fs"),
+            <<"(">>, <<":MODULE">>, Name, <<")">>
+        ],
         [],
         [e4_f:comment("end mod")]),
-    Out = process_fun_defs(Block, Defs),
+    Out = process_code(Block0, Body),
+%%    Out = process_fun_defs(Block, Body),
 %%    io:format("PASS1~n~p~n", [Out]),
 %%    io:format("PASS1~n~s~n", [format_core_forth(Out, 0)]),
     Out.
@@ -38,55 +33,91 @@ process(#c_module{name=_Name, exports=_Exps, defs=Defs}) ->
 add_code(Block = #f_block{code=C}, AddCode) ->
     Block#f_block{code=[AddCode| C]}.
 
--spec process_fun_defs(f_block(), cerl_ast()) -> f_block().
-process_fun_defs(ModB, []) -> ModB;
-process_fun_defs(ModB0, [{#c_var{name={Name, Arity}},
-                          #c_fun{} = Fun} | Remaining]) ->
-    Block1 = e4_f:block(
-            [<<":">>, format_fun_name(Name, Arity)],
-            [compile_fun(Fun)],
-            [<<";">>, e4_f:comment("end fun ~s/~p", [Name, Arity])]),
-    ModB1 = add_code(ModB0, Block1),
-    process_fun_defs(ModB1, Remaining).
+%%-spec process_fun_defs(f_block(), k_ast()) -> f_block().
+%%process_fun_defs(ModB, []) -> ModB;
+%%process_fun_defs(ModB0, [{#c_var{name={Name, Arity}},
+%%                          #c_fun{} = Fun} | Remaining]) ->
+%%    Block1 = e4_f:block(
+%%            [<<":">>, format_fun_name(Name, Arity)],
+%%            [compile_fun(Fun)],
+%%            [<<";">>, e4_f:comment("end fun ~s/~p", [Name, Arity])]),
+%%    ModB1 = add_code(ModB0, Block1),
+%%    process_fun_defs(ModB1, Remaining).
 
-compile_fun(#c_fun{vars=Vars, body=Body}) ->
-    %% Assume stack now only has reversed args
-    ReverseArgs = lists:reverse(lists:map(fun e4_f:var/1, Vars)),
-    Block0 = e4_f:block([], [], [], ReverseArgs),
-    Block1 = lists:foldl(
-        fun(V, Blk) -> emit(Blk, e4_f:mark_new_arg(V)) end,
-        Block0,
-        ReverseArgs),
-    process_code(Block1, Body).
+%%compile_fun(#c_fun{vars=Vars, body=Body}) ->
+%%    %% Assume stack now only has reversed args
+%%    ReverseArgs = lists:reverse(lists:map(fun e4_f:var/1, Vars)),
+%%    Block0 = e4_f:block([], [], [], ReverseArgs),
+%%    Block1 = lists:foldl(
+%%        fun(V, Blk) -> emit(Blk, e4_f:mark_new_arg(V)) end,
+%%        Block0,
+%%        ReverseArgs),
+%%    process_code(Block1, Body).
 
--spec process_code(f_block(), cerl_ast()) -> f_block().
+-spec process_code(f_block(), k_ast()) -> f_block().
 process_code(Block, []) -> Block;
 process_code(Block0, [CoreOp | Tail]) ->
     Block1 = process_code(Block0, CoreOp),
     process_code(Block1, Tail);
 
-process_code(Block0, #c_case{arg=Arg, clauses=Clauses}) ->
-    %% Arg = Tree, Clauses = [Tree]
-    Case0 = e4_f:block(
-        [e4_f:comment("begin case(~s)", [format_vars(Arg)])],
+process_code(ParentBlock,
+             #k_fdef{func=Name, arity=Arity, vars=Vars, body=Body}) ->
+    Block1 = e4_f:block(
+        [<<":">>, format_fun_name(Name, Arity)],
+        [],
+        [<<";">>, e4_f:comment("end fun ~s/~p", [Name, Arity])]),
+    Block2 = process_code(Block1, Body),
+    emit(ParentBlock, Block2);
+
+process_code(Block0, #k_match{vars=Vars, body=Body, ret=Ret}) ->
+    io:format("k_match vars=~p ret=~p~n", [Vars, Ret]),
+    Match0 = e4_f:block(
+        [e4_f:comment("begin match")],
         [],
         [e4_f:comment("end case")]),
-    Case1 = lists:foldl(
-        fun(Clause, Blk) ->
-            Blk1 = pattern_match(Blk, Arg, Clause),
-            process_code(Blk1, Clause)
-        end,
-        Case0,
-        Clauses),
-    emit(Block0, Case1);
+    Match1 = process_code(Match0, Body),
+    emit(Block0, Match1);
 
-process_code(Block0, #c_clause{body=Body}) ->
-    ClauseBlock0 = e4_f:block(
-        [e4_f:comment("begin clause")],
+process_code(Block0, #k_alt{first=First, then=Then}) ->
+%%    io:format("k_alt first=~p~nthen=~p~n", [First, Then]),
+    Alt0 = e4_f:block(
+        [e4_f:comment("begin alt")],
         [],
-        [e4_f:comment("end clause")]),
-    ClauseBlock1 = process_code(ClauseBlock0, Body),
-    emit(Block0, ClauseBlock1);
+        [e4_f:comment("end alt")]),
+    Alt1 = process_code(Alt0, First),
+    Alt2 = process_code(Alt1, Then),
+    emit(Block0, Alt2);
+
+process_code(Block0, #k_select{var=Var, types=Types}) ->
+    io:format("k_select var=~p~ntypes=~p~n", [Var, Types]),
+    Select0 = e4_f:block(
+        [e4_f:comment("begin select")],
+        [],
+        [e4_f:comment("end select")]),
+    Select1 = process_code(Select0, Types),
+    emit(Block0, Select1);
+
+process_code(Block0, #k_type_clause{type=Type, values=Values}) ->
+    io:format("k_type_clause t=~p~nval=~p~n", [Type, Values]),
+    Type0 = e4_f:block(
+        [e4_f:comment("begin type clause")],
+        [],
+        [e4_f:comment("end type clause")]),
+    Type1 = process_code(Type0, Values),
+    emit(Block0, Type1);
+
+process_code(Block0, #k_val_clause{val=Val, body=Body}) ->
+    io:format("k_val_clause val=~p~n", [Val]),
+    Val0 = e4_f:block(
+        [e4_f:comment("begin val clause")],
+        [],
+        [e4_f:comment("end val clause")]),
+    Val1 = process_code(Val0, Body),
+    emit(Block0, Val1);
+
+process_code(Block0, #k_seq{arg=Arg, body=Body}) ->
+    io:format("k_seq arg=~p~n  body=~p~n", [Arg, Body]),
+    process_code(Block0, Body);
 
 process_code(Block0, #c_literal{val=Value}) ->
     emit(Block0, e4_f:lit(Value));
@@ -151,7 +182,7 @@ process_code(Block0, #c_alias{var=Var, pat=Pat}) ->
     emit(Block0, ['?alias', Var, Pat]);
 
 process_code(_Block, X) ->
-    compile_error("E4Cerl: Unknown Core AST piece ~p~n", [X]).
+    compile_error("E4Cerl: Unknown Core AST piece ~9999p~n", [X]).
 
 -spec emit(Block :: f_block(), Code :: intermediate_forth_code()) -> f_block().
 emit(Block, AddCode) when not is_list(AddCode) ->
@@ -177,8 +208,8 @@ pattern_match(State, Args, #c_clause{pats=Pats, guard=Guard, body=Body}) ->
 %% For each element in Arg match element in Pats, additionally emit the
 %% code to check Guard
 -spec pattern_match2(f_block(),
-                      Pats :: [cerl_ast()], Args0 :: cerl_ast(),
-                      Guard :: cerl_ast(), Body :: cerl_ast()) -> f_block().
+                     Pats :: [k_ast()], Args0 :: k_ast(),
+                     Guard :: k_ast(), Body :: k_ast()) -> f_block().
 pattern_match2(Block0, Pats, Args0, _Guard, _Body) ->
     %% Convert to list if c_values is supplied
     Args1 = case Args0 of
@@ -248,7 +279,7 @@ pattern_match_pairs(_State, Lhs, Rhs) ->
         [Lhs, Rhs]).
 
 -spec pattern_match_var_versus(Block :: f_block(),
-                               f_var(), cerl_rhs()|f_var()|f_stacktop())
+                               f_var(), any())
                               -> f_block().
 pattern_match_var_versus(Block0, #c_var{name=LhsName}, Rhs) -> % unwrap left
     pattern_match_var_versus(Block0, e4_f:var(LhsName), Rhs);

@@ -5,7 +5,7 @@
 
 %% @doc Takes filename as input, produces compiled BEAM AST and processes it
 process(F) ->
-    case compile:file(F, [to_core, binary, report]) of
+    case compile:file(F, [to_kernel, binary, report]) of
         {ok, M, CoreErlang} ->
             Forth1      = e4_pass1:process(CoreErlang),
             Forth2      = e4_pass2:process(Forth1),
