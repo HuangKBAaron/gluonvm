@@ -9,7 +9,7 @@
 
 %% Application callbacks
 -export([start/2, stop/1, start_e4_compiler/1, start/0,
-         compile_error/2, compile_error/1]).
+         compile_error/2, compile_error/1, color_term/2]).
 
 %%====================================================================
 %% API
@@ -45,9 +45,12 @@ start_e4_compiler([F | Tail]) ->
 
 -spec compile_error(string()) -> none().
 compile_error(Message) ->
-    erlang:error(Message).
+    io:format("~s~n", [Message]),
+    erlang:error(compile_error).
 
 -spec compile_error(string(), [any()]) -> none().
 compile_error(Format, Args) ->
-    E = lists:flatten(io_lib:format(Format, Args)),
-    erlang:error(E).
+    io:format(Format, Args),
+    erlang:error(compile_error).
+
+color_term(Color, T) -> color:Color(io_lib:format("~9999p", [T])).

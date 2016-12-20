@@ -199,6 +199,10 @@ pattern_match2(Block0, Pats, Args0, _Guard, _Body) ->
 var_exists(#f_block{scope=Scope}, #f_var{} = Var) ->
     lists:member(Var, Scope).
 
+%%%
+%%% Pattern matching
+%%%
+
 %% @doc Given state and left/right side of the match, checks if left-hand
 %% variable existed: if so - emits comparison, else introduces a new variable
 %% and emits the assignment.
@@ -230,6 +234,8 @@ pattern_match_pairs(Block0, #c_literal{val=LhsLit}, Rhs) ->
     ));
 pattern_match_pairs(Block0 = #f_block{}, #c_tuple{es=LhsElements}, Rhs) ->
     pattern_match_tuple_versus(Block0, LhsElements, Rhs);
+pattern_match_pairs(Block0 = #f_block{}, #c_cons{hd=Hd, tl=Tl}, Rhs) ->
+    pattern_match_cons_versus(Block0, Hd, Tl, Rhs);
 pattern_match_pairs(Block0, [#c_var{}=Lhs0], Rhs) ->
     Lhs = e4_f:var(Lhs0),
     Block1 = process_code(Block0, Rhs), % assume Rhs leaves 1 value on stack?
@@ -244,11 +250,28 @@ pattern_match_pairs(Block0, [#c_var{}=Lhs0], Rhs) ->
     end,
     scope_add_var(Block2, Lhs);
 pattern_match_pairs(_State, Lhs, Rhs) ->
-    compile_error("E4 Pass1: Match ~9999p versus ~9999p not implemented",
-        [Lhs, Rhs]).
+    compile_error("E4 Pass1: Match ~s versus ~s not implemented",
+                  [e4:color_term(yellow, Lhs), e4:color_term(red, Rhs)]).
+
+%% @doc Matches a list cons [Hd|Tl] vs something list-like
+%% TODO: Make this a library function
+pattern_match_cons_versus(Block0 = #f_block{}, Hd, Tl, Rhs) ->
+    %% Temporary variable instead of double evaluate Rhs
+    pattern_match_pairs(Block0, Hd, [
+        e4_f:comment("begin cons match"),
+        e4_f:evaluate(Rhs), <<".DECONS">>,
+        e4_f:evaluate(Hd),
+        <<"==">>, <<"INVERT">>, <<"IF">>, <<"ERROR-BADMATCH">>,
+            e4_f:evaluate(Tl),
+            <<"==">>, <<"INVERT">>, <<"IF">>, <<"ERROR-BADMATCH">>,
+            <<"THEN">>,
+        <<"THEN">>,
+        e4_f:comment("end cons match")
+    ]).
 
 -spec pattern_match_var_versus(Block :: f_block(),
-                               f_var(), cerl_rhs()|f_var()|f_stacktop())
+                               Lhs :: cerl_lhs() | f_var(),
+                               Rhs :: cerl_rhs() | f_var() | f_stacktop())
                               -> f_block().
 pattern_match_var_versus(Block0, #c_var{name=LhsName}, Rhs) -> % unwrap left
     pattern_match_var_versus(Block0, e4_f:var(LhsName), Rhs);
@@ -256,18 +279,10 @@ pattern_match_var_versus(Block0, #c_var{name=LhsName}, Rhs) -> % unwrap left
 pattern_match_var_versus(Block0, Lhs, #c_var{name=RhsName}) -> % unwrap right
     pattern_match_var_versus(Block0, Lhs, e4_f:var(RhsName));
 
-pattern_match_var_versus(Block0, #f_var{} = Lhs, Rhs) ->
+pattern_match_var_versus(Block0 = #f_block{}, #f_var{} = Lhs, Rhs) ->
     case is_variable(Lhs) andalso var_exists(Block0, Lhs) of
         true -> % var exists, so compare
-            emit(Block0, [
-                e4_f:comment("compare-match ~p = ~p", [Lhs, Rhs]),
-                e4_f:unless(
-                    [e4_f:equals(e4_f:evaluate(Lhs),
-                                 e4_f:evaluate(Rhs))],
-                    e4_f:block([<<"ERROR-BADMATCH">>])
-                )
-                %% TODO: Use fail label instead of badmatch if possible
-            ]);
+            compare_match(Block0, Lhs, Rhs);
         false -> % var did not exist
             Block1 = case Rhs of
                          #f_var{} ->
@@ -288,9 +303,21 @@ pattern_match_var_versus(Block0, #f_var{} = Lhs, Rhs) ->
                      end,
             scope_add_var(Block1, Lhs)
     end;
-pattern_match_var_versus(_Blk, L, R) ->
-    compile_error("E4 Pass1: Match var ~9999p against ~9999p "
-                  "is not implemented", [L, R]).
+pattern_match_var_versus(#f_block{}, L, R) ->
+    compile_error("E4 Pass1: Match var ~s against ~s is not implemented",
+                  [e4:color_term(yellow, L), e4:color_term(red, R)]).
+
+%% @doc Assuming that Lhs is a known value or an existing variable, evaluate it
+%% and compare to Rhs. Emit badmatch (or TODO something with fail label).
+compare_match(Block0 = #f_block{}, Lhs, Rhs) ->
+    emit(Block0, [
+        e4_f:comment("match known ~p vs ~p", [Lhs, Rhs]),
+        e4_f:unless(
+            [e4_f:equals(e4_f:evaluate(Lhs),
+                         e4_f:evaluate(Rhs))],
+            e4_f:block([<<"ERROR-BADMATCH">>])
+        )
+    ]).
 
 pattern_match_tuple_versus(Block0, LhsElements, #c_var{}=Rhs) ->
     pattern_match_tuple_versus(Block0, LhsElements, e4_f:var(Rhs));
@@ -310,15 +337,16 @@ pattern_match_tuple_versus(Block0, LhsElements, Rhs) ->
     %% For all variables in the left introduce a variable and create
     %% variable assignment
     lists:foldl(
-        fun({Index, Lhs1}, Blk0) ->
-            Blk1 = emit(Blk0, [
-                e4_f:mark_new_var(Lhs1),
-                <<"DUP">>,
-                e4_f:element(Index, #f_stacktop{})
-            ]),
-            pattern_match_var_versus(Blk1, Lhs1, #f_stacktop{})
+        fun({_Index, Lhs1}, Blk0) ->
+            pattern_match_pairs(Blk0, Lhs1, Rhs)
+%%            Blk1 = emit(Blk0, [
+%%                e4_f:mark_new_var(Lhs1),
+%%                <<"DUP">>,
+%%                e4_f:element(Index, #f_stacktop{})
+%%            ]),
+%%            pattern_match_var_versus(Blk1, Lhs1, #f_stacktop{})
         end,
-        emit(Block1, [e4_f:evaluate(Rhs)]),
+        Block1, %% emit(Block1, [e4_f:evaluate(Rhs)]),
         LhsPairs).
 %%pattern_match_tuple_versus(_State, _Lhs, Rhs) ->
 %%    compile_error("E4Cerl: Match tuple vs ~9999p is not implemented", [Rhs]).

@@ -19,6 +19,8 @@
 :NIF .IS-TUPLE -34
 :NIF .MAKE-TUPLE -35
 
+:NIF .DECONS -40 ( takes a list and leaves hd and tl on the stack )
+
 : ERROR-FN-CLAUSE 'function_clause .ERROR ;
 : ERROR-BADMATCH 'badmatch .ERROR ;
 : ERROR-BADARG 'badarg .ERROR ;
