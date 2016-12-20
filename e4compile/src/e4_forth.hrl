@@ -104,9 +104,10 @@
 -record(f_leave, {size=0 :: pos_integer()}).
 -type f_leave() :: #f_leave{}.
 
-%%
-%% Grouping types
-%%
+%%%
+%%% Grouping types
+%%%
+
 -type forth_word() :: binary().
 -define(IS_FORTH_WORD(X), is_binary(X)).
 
@@ -121,5 +122,12 @@
 
 -record(f_include, {filename="" :: string()}).
 -type f_include() :: #f_include{}.
+
+%%%
+%%% Pattern match engine
+%%%
+
+-record(pm_TEST, {}).
+-record(pm_MATCH, {}).
 
 -endif. % E4_FORTH_HRL

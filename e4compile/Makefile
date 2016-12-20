@@ -1,5 +1,6 @@
 # Name the module which is used for test compilation
-TESTMODULE=gb_trees
+#TESTMODULE=gb_trees
+TESTMODULE=test1
 
 .PHONY: run
 run:

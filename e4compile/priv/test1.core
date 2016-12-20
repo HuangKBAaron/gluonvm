@@ -1,4 +1,6 @@
-module 'test1' ['map_1'/2,
+module 'test1' ['iterator'/2,
+		'linear_pattern'/2,
+		'map_1'/2,
 		'module_info'/0,
 		'module_info'/1]
     attributes []
@@ -11,17 +13,23 @@ module 'test1' ['map_1'/2,
 	  %% Line 5
 	  <F,{K,V,Smaller,Larger}> when 'true' ->
 	      let <_cor4> =
-		  %% Line 6
-		  apply F
-		      (K, V)
+		  apply %% Line 6
+			F
+		      (%% Line 6
+		       K, %% Line 6
+			  V)
 	      in  let <_cor3> =
-		      %% Line 6
-		      apply 'map_1'/2
-			  (F, Smaller)
+		      apply %% Line 6
+			    'map_1'/2
+			  (%% Line 6
+			   F, %% Line 6
+			      Smaller)
 		  in  let <_cor2> =
-			  %% Line 6
-			  apply 'map_1'/2
-			      (F, Larger)
+			  apply %% Line 6
+				'map_1'/2
+			      (%% Line 6
+			       F, %% Line 6
+				  Larger)
 		      in  %% Line 6
 			  {K,_cor4,_cor3,_cor2}
 	  ( <_cor6,_cor5> when 'true' ->
@@ -30,24 +38,50 @@ module 'test1' ['map_1'/2,
 		  -| [{'function_name',{'map_1',2}}] )
 	    -| ['compiler_generated'] )
 	end
+'linear_pattern'/2 =
+    %% Line 8
+    fun (_cor1,_cor0) ->
+	case <_cor1,_cor0> of
+	  <F,{_cor4,X}>
+	      when call 'erlang':'=:='
+		    (_cor4,
+		     F) ->
+	      call 'erlang':'+'
+		  (F, X)
+	  ( <_cor3,_cor2> when 'true' ->
+		( primop 'match_fail'
+		      ({'function_clause',_cor3,_cor2})
+		  -| [{'function_name',{'linear_pattern',2}}] )
+	    -| ['compiler_generated'] )
+	end
+'iterator'/2 =
+    %% Line 10
+    fun (_cor1,_cor0) ->
+	case <_cor1,_cor0> of
+	  <T = {_cor4,_cor5,'nil',_cor6},As> when 'true' ->
+	      %% Line 11
+	      [T|As]
+	  %% Line 12
+	  <T = {_cor7,_cor8,L,_cor9},As> when 'true' ->
+	      %% Line 13
+	      apply 'iterator'/2
+		  (L, [T|As])
+	  %% Line 14
+	  <'nil',As> when 'true' ->
+	      %% Line 15
+	      As
+	  ( <_cor3,_cor2> when 'true' ->
+		( primop 'match_fail'
+		      ({'function_clause',_cor3,_cor2})
+		  -| [{'function_name',{'iterator',2}}] )
+	    -| ['compiler_generated'] )
+	end
 'module_info'/0 =
-    ( fun () ->
-	  ( call ( 'erlang'
-		   -| ['compiler_generated'] ):( 'get_module_info'
-						 -| ['compiler_generated'] )
-		(( 'test1'
-		   -| ['compiler_generated'] ))
-	    -| ['compiler_generated'] )
-      -| ['compiler_generated'] )
+    fun () ->
+	call 'erlang':'get_module_info'
+	    ('test1')
 'module_info'/1 =
-    ( fun (( _cor0
-	     -| ['compiler_generated'] )) ->
-	  ( call ( 'erlang'
-		   -| ['compiler_generated'] ):( 'get_module_info'
-						 -| ['compiler_generated'] )
-		(( 'test1'
-		   -| ['compiler_generated'] ), ( _cor0
-						  -| ['compiler_generated'] ))
-	    -| ['compiler_generated'] )
-      -| ['compiler_generated'] )
+    fun (_cor0) ->
+	call 'erlang':'get_module_info'
+	    ('test1', _cor0)
 end

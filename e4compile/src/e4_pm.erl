@@ -4,13 +4,16 @@
 -module(e4_pm).
 
 %% API
--export([]).
+-export([pattern_match_compile/3]).
 
--include_lib("compiler/src/core_parse.hrl").
+-include("e4_core_erl.hrl").
 -include("e4_forth.hrl").
 
-%% @doc Given Core Erlang pattern match input, produces a decision tree
-%% to solve the match expression.
--spec pattern_match(f_block(), cerl_lhs(), cerl_rhs()) -> f_block().
-pattern_match(Block0 = #f_block{}, Left, Right) ->
+%% @doc Given Core Erlang pattern match input.
+%% Takes: a value (right) and list of clauses (left)
+%% Returns: a decision tree to solve the match expression for all clauses
+-spec pattern_match_compile(f_block(),
+                            cerl_rhs(),
+                            [cerl:c_clause()]) -> f_block().
+pattern_match_compile(Block0 = #f_block{}, Arg, Clauses) ->
     Block0.

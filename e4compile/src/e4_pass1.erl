@@ -6,7 +6,7 @@
 -export([process/1, process_code/2, module_new/0, get_code/1,
     emit/2, format_core_forth/2]).
 
--include_lib("compiler/src/core_parse.hrl").
+-include("e4_core_erl.hrl").
 -include("e4_forth.hrl").
 
 -import(e4, [compile_error/2]).
@@ -67,17 +67,18 @@ process_code(Block0, [CoreOp | Tail]) ->
 
 process_code(Block0, #c_case{arg=Arg, clauses=Clauses}) ->
     %% Arg = Tree, Clauses = [Tree]
-    Case0 = e4_f:block(
-        [e4_f:comment("begin case(~s)", [format_vars(Arg)])],
-        [],
-        [e4_f:comment("end case")]),
-    Case1 = lists:foldl(
-        fun(Clause, Blk) ->
-            Blk1 = handle_clause(Blk, Arg, Clause),
-            process_code(Blk1, Clause)
-        end,
-        Case0,
-        Clauses),
+%%    Case0 = e4_f:block(
+%%        [e4_f:comment("begin case(~s)", [format_vars(Arg)])],
+%%        [],
+%%        [e4_f:comment("end case")]),
+%%    Case1 = lists:foldl(
+%%        fun(Clause, Blk) ->
+%%            Blk1 = handle_clause(Blk, Arg, Clause),
+%%            process_code(Blk1, Clause)
+%%        end,
+%%        Case0,
+%%        Clauses),
+    Case1 = e4_pm:pattern_match_compile(Arg, Clauses),
     emit(Block0, Case1);
 
 process_code(Block0, #c_clause{body=Body}) ->
