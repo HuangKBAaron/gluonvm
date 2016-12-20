@@ -73,7 +73,7 @@ process_code(Block0, #c_case{arg=Arg, clauses=Clauses}) ->
         [e4_f:comment("end case")]),
     Case1 = lists:foldl(
         fun(Clause, Blk) ->
-            Blk1 = pattern_match(Blk, Arg, Clause),
+            Blk1 = handle_clause(Blk, Arg, Clause),
             process_code(Blk1, Clause)
         end,
         Case0,
@@ -171,15 +171,15 @@ format_fun_name(Name, Arity) ->
 
 %% Builds code to match Arg vs Pats with Guard
 %% Pats = [Tree], Guard = Tree, Body = Tree
-pattern_match(State, Args, #c_clause{pats=Pats, guard=Guard, body=Body}) ->
-    pattern_match2(State, Pats, Args, Guard, Body).
+handle_clause(State, Args, #c_clause{pats=Pats, guard=Guard, body=Body}) ->
+    handle_clause2(State, Pats, Args, Guard, Body).
 
 %% For each element in Arg match element in Pats, additionally emit the
 %% code to check Guard
--spec pattern_match2(f_block(),
-                      Pats :: [cerl_ast()], Args0 :: cerl_ast(),
-                      Guard :: cerl_ast(), Body :: cerl_ast()) -> f_block().
-pattern_match2(Block0, Pats, Args0, _Guard, _Body) ->
+-spec handle_clause2(f_block(),
+                     Pats :: [cerl_ast()], Args0 :: cerl_ast(),
+                     Guard :: cerl_ast(), Body :: cerl_ast()) -> f_block().
+handle_clause2(Block0, Pats, Args0, _Guard, _Body) ->
     %% Convert to list if c_values is supplied
     Args1 = case Args0 of
                 #c_values{es=Es} -> Es;
@@ -193,7 +193,10 @@ pattern_match2(Block0, Pats, Args0, _Guard, _Body) ->
     %% Pair args and pats and compare
     PatsArgs = lists:zip(Pats, Args),
     lists:foldl(
-        fun({Pat, Arg}, Blk) -> pattern_match_pairs(Blk, Pat, Arg) end,
+        fun({Pat, Arg}, Blk) ->
+            %% pattern_match_pairs(Blk, Pat, Arg)
+            e4_pm:pattern_match(Blk, Pat, Arg)
+        end,
         Block0, PatsArgs).
 
 var_exists(#f_block{scope=Scope}, #f_var{} = Var) ->
