@@ -54,51 +54,7 @@ process_code(ParentBlock,
 %%    io:format("k_var ~p~n", [Var]),
 %%    emit(Block0, e4_f:eval(Var));
 
-process_code(Block0, #k_match{vars=Vars, body=Body, ret=Ret}) ->
-    io:format("k_match vars=~p ret=~p~n", [Vars, Ret]),
-    Match0 = e4_f:block(
-        [e4_f:comment("begin match")],
-        [],
-        [e4_f:comment("end case")]),
-    Match1 = process_code(Match0, Body),
-    emit(Block0, Match1);
-
-process_code(Block0, #k_alt{first=First, then=Then}) ->
-%%    io:format("k_alt first=~p~nthen=~p~n", [First, Then]),
-    Alt0 = e4_f:block(
-        [e4_f:comment("begin alt")],
-        [],
-        [e4_f:comment("end alt")]),
-    Alt1 = process_code(Alt0, First),
-    Alt2 = process_code(Alt1, Then),
-    emit(Block0, Alt2);
-
-process_code(Block0, #k_select{var=Var, types=Types}) ->
-    io:format("k_select var=~p~ntypes=~p~n", [Var, Types]),
-    Select0 = e4_f:block(
-        [e4_f:comment("begin select")],
-        [],
-        [e4_f:comment("end select")]),
-    Select1 = process_code(Select0, Types),
-    emit(Block0, Select1);
-
-process_code(Block0, #k_type_clause{type=Type, values=Values}) ->
-    io:format("k_type_clause t=~p~n  val=~p~n", [Type, Values]),
-    Type0 = e4_f:block(
-        [e4_f:comment("begin type clause")],
-        [],
-        [e4_f:comment("end type clause")]),
-    Type1 = process_code(Type0, Values),
-    emit(Block0, Type1);
-
-process_code(Block0, #k_val_clause{val=Val, body=Body}) ->
-    io:format("k_val_clause val=~p~n  body=~p~n", [Val, Body]),
-    Val0 = e4_f:block(
-        [e4_f:comment("begin val clause")],
-        [],
-        [e4_f:comment("end val clause")]),
-    Val1 = process_code(Val0, Body),
-    emit(Block0, Val1);
+process_code(Block0, KM = #k_match{}) -> process_match_block(Block0, '_', KM);
 
 process_code(Block0, #k_seq{arg=Arg, body=Body}) ->
     io:format("k_seq arg=~p~n  body=~p~n", [Arg, Body]),
@@ -128,6 +84,74 @@ process_code(Block0, #k_put{arg=Arg, ret=Ret}) ->
 process_code(_Block, X) ->
     ?COMPILE_ERROR("E4Cerl: Unknown Core AST piece ~s~n",
                    [?COLOR_TERM(red, X)]).
+
+%%%
+%%% Compiling nested match + alt + select + type_/val_clause code structure
+%%%
+
+-record(match_ctx, {vars = [] :: [k_var()]}).
+-type match_ctx() :: #match_ctx{}.
+-type match_elem_group() :: k_match() | k_alt() | k_select() | k_type_clause()
+    | k_val_clause() | k_seq() | list().
+
+-spec process_match_block(f_block(), match_ctx() | '_', match_elem_group())
+                         -> f_block().
+process_match_block(Block0, '_', #k_match{vars=Vars, body=Body, ret=Ret}) ->
+    Match0 = e4_f:block(
+        [e4_f:comment("begin match")],
+        [],
+        [e4_f:comment("end match")]),
+    Match1 = process_match_block(Match0, Vars, Body),
+    Match2 = emit(Match1, [e4_f:store(Ret)]),
+    emit(Block0, Match2);
+
+process_match_block(Match0, Context, L) when is_list(L) ->
+    lists:foldl(fun(El, Match) -> process_match_block(Match, Context, El) end,
+        Match0, L);
+
+process_match_block(Block0, Context, #k_alt{first=First, then=Then}) ->
+%%    io:format("k_alt first=~p~nthen=~p~n", [First, Then]),
+    Alt0 = e4_f:block(
+        [e4_f:comment("begin alt")],
+        [],
+        [e4_f:comment("end alt")]),
+    Alt1 = process_match_block(Alt0, Context, First),
+    Alt2 = process_match_block(Alt1, Context, Then),
+    emit(Block0, Alt2);
+
+process_match_block(Block0, Context, #k_select{var=Var, types=Types}) ->
+    io:format("k_select var=~p~ntypes=~p~n", [Var, Types]),
+    Select0 = e4_f:block(
+        [e4_f:comment("begin select")],
+        [],
+        [e4_f:comment("end select")]),
+    Select1 = process_match_block(Select0, Context, Types),
+    emit(Block0, Select1);
+
+process_match_block(Block0, Context, #k_type_clause{type=Type, values=Values}) ->
+    io:format("k_type_clause t=~p~n  val=~p~n", [Type, Values]),
+    Type0 = e4_f:block(
+        [e4_f:comment("begin type clause")],
+        [],
+        [e4_f:comment("end type clause")]),
+    Type1 = process_match_block(Type0, Context, Values),
+    emit(Block0, Type1);
+
+process_match_block(Block0, _Context, #k_val_clause{val=Val, body=Body}) ->
+    io:format("k_val_clause val=~p~n  body=~p~n", [Val, Body]),
+    Val0 = e4_f:block(
+        [e4_f:comment("begin val clause")],
+        [],
+        [e4_f:comment("end val clause")]),
+    Val1 = process_code(Val0, Body),
+    emit(Block0, Val1);
+
+process_match_block(Block0, _Context, #k_seq{}=Seq) ->
+    process_code(Block0, Seq);
+
+process_match_block(_Block0, Context, Other) ->
+    ?COMPILE_ERROR("E4 Pass1: Match block unknown element ~s (context ~s)",
+        [?COLOR_TERM(red, Other), ?COLOR_TERM(yellow, Context)]).
 
 %% @doc Transform list of variables, literals and expressions into something
 %% which evaluates them, or reads variable values or something. And leaves all

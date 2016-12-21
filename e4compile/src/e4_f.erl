@@ -105,7 +105,7 @@ block(Before, Code, After, Scope) ->
     #f_block{before=Before, code=Code, 'after'=After, scope=Scope}.
 
 %% ( X -- , stores value X on stack into variable Dst )
-%%store([#k_var{}] = Vars) -> [#f_st{var=Dst} || Dst <- Vars];
+store([]) -> []; % for where empty ret=[] is provided
 store([Dst = #k_var{}]) -> #f_st{var=Dst};
 store(Dst = #k_var{}) -> #f_st{var=Dst}.
 

@@ -49,7 +49,7 @@
 
 -type k_ast_element() ::
     k_literal() | k_int() | k_atom() | k_float() | k_binary() | k_nil()
-    .
+    | k_seq().
 -type k_ast() :: k_ast_element() | [k_ast_element()].
 
 -endif. % E4_KERNEL_ERLANG_HRL
