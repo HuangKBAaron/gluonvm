@@ -8,8 +8,9 @@
 -behaviour(application).
 
 %% Application callbacks
--export([start/2, stop/1, start_e4_compiler/1, start/0,
-         compile_error/2, compile_error/1]).
+-export([start/2, stop/1, start_e4_compiler/1, start/0]).
+
+-include("e4.hrl").
 
 %%====================================================================
 %% API
@@ -37,14 +38,11 @@ start_e4_compiler([F | Tail]) ->
     io:format("E4: Processing: ~p...~n", [F]),
     try e4_compiler:process(F)
     catch T:Err ->
-        io:format("~n~s~n~p ~p~n~p~n", [
-            color:red("E4: Failed"),
-            T, Err, erlang:get_stacktrace()])
+        io:format("~n~s ~s~n"
+                  "~s~n",
+                  [color:red("E4: Failed"), ?COLOR_TERM(redb, {T, Err}),
+                   ?COLOR_TERM(blackb, erlang:get_stacktrace())
+                  ])
     end,
     start_e4_compiler(Tail).
 
-compile_error(Format) -> compile_error(Format, []).
-
-compile_error(Format, Args) ->
-    E = lists:flatten(io_lib:format(Format, Args)),
-    erlang:error(E).

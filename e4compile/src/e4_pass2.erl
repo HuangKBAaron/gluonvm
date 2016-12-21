@@ -6,7 +6,7 @@
 %% API
 -export([process/1]).
 -include("e4_forth.hrl").
--import(e4, [compile_error/2, compile_error/1]).
+-include("e4.hrl").
 
 process(CoreForth) ->
     NewM = #f_module{
@@ -81,7 +81,7 @@ process_op(Mod0 = #f_module{}, #f_ld{var=V}) ->
     emit(Mod0, e4_f2:retrieve(Mod0, V));
 process_op(Mod0 = #f_module{}, #f_st{var=V}) ->
     emit(Mod0, e4_f2:store(Mod0, V));
-process_op(Mod0 = #f_module{}, #f_lit{} = Lit) ->
+process_op(Mod0 = #f_module{}, #k_literal{} = Lit) ->
     emit(Mod0, Lit);
 process_op(Mod0, #f_include{filename=F}) ->
     emit(Mod0, e4_forth_parse:parse(F));
@@ -92,7 +92,7 @@ process_op(Mod0 = #f_module{}, #f_apply{funobj=FO, args=Args}) ->
         Args),
     emit(Mod1, [e4_f2:retrieve(Mod1, FO), <<".APPLY">>]);
 process_op(_Mod0, CF) ->
-    compile_error("E4 Pass2: Unknown op ~p~n", [CF]).
+    ?COMPILE_ERROR("E4 Pass2: Unknown op ~s~n", [?COLOR_TERM(red, CF)]).
 
 allocate_var(Mod0 = #f_module{alloc_vars=Vars}, V) ->
     Mod0#f_module{alloc_vars=e4_f2:alloc_var(Vars, V, stack_frame)}.

@@ -5,12 +5,11 @@
 %% API
 -export([process/1]).
 -include("e4_forth.hrl").
--import(e4, [compile_error/2]).
 
 process(Forth) ->
     Output = optimize_code([], Forth),
     Output1 = optimize_code([], Output),
-    Output2 = lists:map(
+    _Output2 = lists:map(
         fun(<<";">>) -> io_lib:format(";~n", []);
             (X) when is_integer(X) -> io_lib:format("~p ", [X]);
             (X) -> io_lib:format("~s ", [X])

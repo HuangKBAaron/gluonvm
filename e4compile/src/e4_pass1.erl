@@ -7,10 +7,10 @@
     emit/2, format_core_forth/2]).
 
 -include_lib("compiler/src/core_parse.hrl").
+
 -include("e4_kernel_erl.hrl").
 -include("e4_forth.hrl").
-
--import(e4, [compile_error/2]).
+-include("e4.hrl").
 
 module_new() -> #f_mod_pass1{}.
 
@@ -20,39 +20,15 @@ process(#k_mdef{name=Name, exports=_Exps, attributes=_Attr, body=Body}) ->
         [
             e4_f:comment("begin mod"),
             e4_f:include("forth-lib/e4core.fs"),
-            <<"(">>, <<":MODULE">>, Name, <<")">>
+            <<"(">>, <<":MODULE">>, atom_to_binary(Name, utf8), <<")">>
         ],
         [],
         [e4_f:comment("end mod")]),
     Out = process_code(Block0, Body),
 %%    Out = process_fun_defs(Block, Body),
-%%    io:format("PASS1~n~p~n", [Out]),
+    io:format("PASS1~n~p~n", [Out]),
 %%    io:format("PASS1~n~s~n", [format_core_forth(Out, 0)]),
     Out.
-
-add_code(Block = #f_block{code=C}, AddCode) ->
-    Block#f_block{code=[AddCode| C]}.
-
-%%-spec process_fun_defs(f_block(), k_ast()) -> f_block().
-%%process_fun_defs(ModB, []) -> ModB;
-%%process_fun_defs(ModB0, [{#c_var{name={Name, Arity}},
-%%                          #c_fun{} = Fun} | Remaining]) ->
-%%    Block1 = e4_f:block(
-%%            [<<":">>, format_fun_name(Name, Arity)],
-%%            [compile_fun(Fun)],
-%%            [<<";">>, e4_f:comment("end fun ~s/~p", [Name, Arity])]),
-%%    ModB1 = add_code(ModB0, Block1),
-%%    process_fun_defs(ModB1, Remaining).
-
-%%compile_fun(#c_fun{vars=Vars, body=Body}) ->
-%%    %% Assume stack now only has reversed args
-%%    ReverseArgs = lists:reverse(lists:map(fun e4_f:var/1, Vars)),
-%%    Block0 = e4_f:block([], [], [], ReverseArgs),
-%%    Block1 = lists:foldl(
-%%        fun(V, Blk) -> emit(Blk, e4_f:mark_new_arg(V)) end,
-%%        Block0,
-%%        ReverseArgs),
-%%    process_code(Block1, Body).
 
 -spec process_code(f_block(), k_ast()) -> f_block().
 process_code(Block, []) -> Block;
@@ -62,12 +38,21 @@ process_code(Block0, [CoreOp | Tail]) ->
 
 process_code(ParentBlock,
              #k_fdef{func=Name, arity=Arity, vars=Vars, body=Body}) ->
+    io:format("k_fdef name=~s vars~p~n", [Name, Vars]),
     Block1 = e4_f:block(
         [<<":">>, format_fun_name(Name, Arity)],
         [],
         [<<";">>, e4_f:comment("end fun ~s/~p", [Name, Arity])]),
-    Block2 = process_code(Block1, Body),
-    emit(ParentBlock, Block2);
+    Block2 = lists:foldl(
+        fun(A, Blk) -> emit(Blk, e4_f:mark_new_arg(A)) end,
+        Block1, Vars
+    ),
+    Block3 = process_code(Block2, Body),
+    emit(ParentBlock, Block3);
+
+%%process_code(Block0, #k_var{name=Var}) ->
+%%    io:format("k_var ~p~n", [Var]),
+%%    emit(Block0, e4_f:eval(Var));
 
 process_code(Block0, #k_match{vars=Vars, body=Body, ret=Ret}) ->
     io:format("k_match vars=~p ret=~p~n", [Vars, Ret]),
@@ -98,7 +83,7 @@ process_code(Block0, #k_select{var=Var, types=Types}) ->
     emit(Block0, Select1);
 
 process_code(Block0, #k_type_clause{type=Type, values=Values}) ->
-    io:format("k_type_clause t=~p~nval=~p~n", [Type, Values]),
+    io:format("k_type_clause t=~p~n  val=~p~n", [Type, Values]),
     Type0 = e4_f:block(
         [e4_f:comment("begin type clause")],
         [],
@@ -107,7 +92,7 @@ process_code(Block0, #k_type_clause{type=Type, values=Values}) ->
     emit(Block0, Type1);
 
 process_code(Block0, #k_val_clause{val=Val, body=Body}) ->
-    io:format("k_val_clause val=~p~n", [Val]),
+    io:format("k_val_clause val=~p~n  body=~p~n", [Val, Body]),
     Val0 = e4_f:block(
         [e4_f:comment("begin val clause")],
         [],
@@ -117,72 +102,41 @@ process_code(Block0, #k_val_clause{val=Val, body=Body}) ->
 
 process_code(Block0, #k_seq{arg=Arg, body=Body}) ->
     io:format("k_seq arg=~p~n  body=~p~n", [Arg, Body]),
-    process_code(Block0, Body);
+    Block1 = process_code(Block0, Arg),
+    process_code(Block1, Body);
 
-process_code(Block0, #c_literal{val=Value}) ->
-    emit(Block0, e4_f:lit(Value));
+process_code(Block0, #k_return{args=Args}) ->
+    io:format("k_return args=~p~n", [Args]),
+    Block1 = eval_args(Block0, Args),
+    emit(Block1, [<<"RET">>]);
 
-process_code(Block0, #c_let{vars=Vars, arg=Arg, body=Body}) ->
-    % ReverseVars = lists:map(fun e4_cf:var/1, Vars),
-    LetBlock = e4_f:block(
-        [e4_f:comment("begin let(~s)", [format_vars(Vars)])],
-        [],
-        [e4_f:comment("end let")],
-        Block0#f_block.scope
-        %% ++ ReverseVars
-    ),
+process_code(Block0, #k_enter{op=Op, args=Args}) ->
+    io:format("k_enter op=~p args=~p~n", [Op, Args]),
+    Block1 = eval_args(Block0, Args),
+    emit(Block1, [Op, <<"JUMP">>]);
 
-    %% LetBlock1 = process_code(LetBlock, Arg),
-    LetBlock1 = lists:foldl(
-        fun(V, Blk) ->
-            V1 = e4_f:var(V),
-            Blk1 = emit(Blk, e4_f:mark_new_var(V1)),
-            scope_add_var(Blk1, V1)
-        end,
-        LetBlock,
-        Vars),
-    %% TODO: Can vars be longer than 1?
-    [_] = Vars,
-    LetBlock2 = pattern_match_pairs(LetBlock1, hd(Vars), Arg),
-    LetBlock3 = process_code(LetBlock2, Body),
-    emit(Block0, LetBlock3);
+process_code(Block0, #k_call{op=Op, args=Args, ret=Ret}) ->
+    io:format("k_call op=~p~n  args=~p~n  ret=~p~n", [Op, Args, Ret]),
+    Block1 = eval_args(Block0, Args),
+    Block2 = emit(Block1, [Op, <<"CALL">>]),
+    emit(Block2, e4_f:store(Ret));
 
-process_code(Block0, #c_apply{op=Op, args=Args}) ->
-    emit(Block0,
-         lists:reverse(lists:map(fun e4_f:retrieve/1, Args)) ++ [
-             e4_f:lit(length(Args)),
-             e4_f:retrieve(Op),
-             <<".APPLY">>
-        ]
-    );
-
-process_code(Block0, #c_call{module=M, name=N, args=Args}) ->
-    emit(Block0,
-         lists:reverse(lists:map(fun e4_f:retrieve/1, Args)) ++ [
-            [e4_f:make_mfarity(e4_f:retrieve(M), e4_f:retrieve(N),
-                                length(Args))]
-         ]);
-
-process_code(Block0, #c_primop{name=Name, args=Args}) ->
-    emit(Block0, lists:reverse(lists:map(fun e4_f:retrieve/1, Args))
-%%                 ++ [e4_f:retrieve(Name), <<"PRIMOP">>]
-        ++ [e4_f:primop(Name, length(Args))]
-    );
-
-process_code(Block0, #c_tuple{es=Es}) ->
-    emit(Block0, e4_f:tuple(lists:map(fun e4_f:retrieve/1, Es)));
-
-process_code(Block0, #c_cons{hd=H, tl=T}) ->
-    emit(Block0, ['?cons', H, T]);
-
-process_code(Block0, #c_var{name=N}) ->
-    emit(Block0, [e4_f:comment("retrieve ~p", [N])]);
-
-process_code(Block0, #c_alias{var=Var, pat=Pat}) ->
-    emit(Block0, ['?alias', Var, Pat]);
+process_code(Block0, #k_put{arg=Arg, ret=Ret}) ->
+    io:format("k_put arg=~p ret=~p~n", [Arg, Ret]),
+    emit(Block0, [e4_f:eval(Arg), e4_f:store(Ret)]);
 
 process_code(_Block, X) ->
-    compile_error("E4Cerl: Unknown Core AST piece ~9999p~n", [X]).
+    ?COMPILE_ERROR("E4Cerl: Unknown Core AST piece ~s~n",
+                   [?COLOR_TERM(red, X)]).
+
+%% @doc Transform list of variables, literals and expressions into something
+%% which evaluates them, or reads variable values or something. And leaves all
+%% of them on the stack in the good order for a function call following after.
+eval_args(Block, Args) ->
+    lists:foldl(
+        fun(A, Blk) -> emit(Blk, e4_f:eval(A)) end,
+        Block, Args
+    ).
 
 -spec emit(Block :: f_block(), Code :: intermediate_forth_code()) -> f_block().
 emit(Block, AddCode) when not is_list(AddCode) ->
@@ -200,149 +154,6 @@ emit(Block, AddCode) ->
 format_fun_name(Name, Arity) ->
     #f_mfa{mod='.', fn=Name, arity=Arity}.
 
-%% Builds code to match Arg vs Pats with Guard
-%% Pats = [Tree], Guard = Tree, Body = Tree
-pattern_match(State, Args, #c_clause{pats=Pats, guard=Guard, body=Body}) ->
-    pattern_match2(State, Pats, Args, Guard, Body).
-
-%% For each element in Arg match element in Pats, additionally emit the
-%% code to check Guard
--spec pattern_match2(f_block(),
-                     Pats :: [k_ast()], Args0 :: k_ast(),
-                     Guard :: k_ast(), Body :: k_ast()) -> f_block().
-pattern_match2(Block0, Pats, Args0, _Guard, _Body) ->
-    %% Convert to list if c_values is supplied
-    Args1 = case Args0 of
-                #c_values{es=Es} -> Es;
-                _ -> Args0
-            end,
-    %% Convert to list if it was a single tuple
-    Args = case is_list(Args1) of
-               true -> Args1;
-               false -> [Args1]
-           end,
-    %% Pair args and pats and compare
-    PatsArgs = lists:zip(Pats, Args),
-    lists:foldl(
-        fun({Pat, Arg}, Blk) -> pattern_match_pairs(Blk, Pat, Arg) end,
-        Block0, PatsArgs).
-
-var_exists(#f_block{scope=Scope}, #f_var{} = Var) ->
-    lists:member(Var, Scope).
-
-%% @doc Given state and left/right side of the match, checks if left-hand
-%% variable existed: if so - emits comparison, else introduces a new variable
-%% and emits the assignment.
--spec pattern_match_pairs(f_block(),
-                          Lhs :: any() | [any()],
-                          Rhs :: any())
-                         -> f_block().
-pattern_match_pairs(Block0, #c_var{name=LhsName}, Rhs) -> % unwrap left
-    pattern_match_pairs(Block0, e4_f:var(LhsName), Rhs);
-
-pattern_match_pairs(Block0, Lhs, #c_var{name=RhsName}) -> % unwrap right
-    pattern_match_pairs(Block0, Lhs, e4_f:var(RhsName));
-
-pattern_match_pairs(Block0 = #f_block{scope=Scope0}, #f_var{}=Lhs, Rhs) ->
-    case var_exists(Block0, Lhs) of % if have variable in scope
-        true -> % variable exists, so read it and compare
-            emit(Block0, [
-                e4_f:match_two_values(e4_f:retrieve(Lhs), Rhs),
-                e4_f:comment("match two known")
-            ]);
-        false -> % introduce variable and use it
-            Block1 = Block0#f_block{scope = Scope0},
-            pattern_match_var_versus(Block1, Lhs, Rhs)
-    end;
-pattern_match_pairs(Block0, #c_literal{val=LhsLit}, Rhs) ->
-    emit(Block0, e4_f:match_two_values(
-        e4_f:lit(LhsLit),
-        e4_f:retrieve(Rhs)
-    ));
-pattern_match_pairs(Block0 = #f_block{}, #c_tuple{es=LhsElements}, Rhs) ->
-    pattern_match_tuple_versus(Block0, LhsElements, Rhs);
-pattern_match_pairs(Block0, [#c_var{}=Lhs0], Rhs) ->
-    Lhs = e4_f:var(Lhs0),
-    Block1 = process_code(Block0, Rhs), % assume Rhs leaves 1 value on stack?
-    Block2 = case var_exists(Block1, Lhs) of
-        true -> emit(Block1, [e4_f:store(Lhs)]); % Store Rhs result into Lhs
-        false ->
-            emit(Block1, [
-                e4_f:mark_new_var(Lhs),
-                e4_f:store(Lhs),
-                e4_f:comment("introduce variable")
-            ])
-    end,
-    scope_add_var(Block2, Lhs);
-pattern_match_pairs(_State, Lhs, Rhs) ->
-    compile_error("E4 Pass1: Match ~9999p versus ~9999p not implemented",
-        [Lhs, Rhs]).
-
--spec pattern_match_var_versus(Block :: f_block(),
-                               f_var(), any())
-                              -> f_block().
-pattern_match_var_versus(Block0, #c_var{name=LhsName}, Rhs) -> % unwrap left
-    pattern_match_var_versus(Block0, e4_f:var(LhsName), Rhs);
-
-pattern_match_var_versus(Block0, Lhs, #c_var{name=RhsName}) -> % unwrap right
-    pattern_match_var_versus(Block0, Lhs, e4_f:var(RhsName));
-
-pattern_match_var_versus(Block0, #f_var{} = Lhs, Rhs) ->
-    case var_exists(Block0, Lhs) of
-        true -> % var exists, so compare
-            emit(Block0, [
-                e4_f:comment("compare-match ~p = ~p", [Lhs, Rhs]),
-                e4_f:unless(
-                    [e4_f:equals(e4_f:retrieve(Lhs), e4_f:retrieve(Rhs))],
-                    e4_f:block([<<"ERROR-BADMATCH">>])
-                )
-                %% TODO: Use fail label instead of badmatch if possible
-            ]);
-        false -> % var did not exist, so copy-assign
-            Block1 = emit(Block0, [
-                e4_f:comment("assign-match ~s = ~s",
-                    [
-                        format_vars([Lhs]), format_vars([Rhs])
-                    ]),
-                e4_f:mark_alias(Lhs, Rhs)
-            ]),
-            scope_add_var(Block1, Lhs)
-    end;
-pattern_match_var_versus(_Blk, L, R) ->
-    compile_error("E4 Pass1: Match var ~9999p against ~9999p "
-                  "is not implemented", [L, R]).
-
-pattern_match_tuple_versus(Block0, LhsElements, #c_var{}=Rhs) ->
-    pattern_match_tuple_versus(Block0, LhsElements, e4_f:var(Rhs));
-pattern_match_tuple_versus(Block0, LhsElements, Rhs) ->
-    %% Iterate a list of [{1,Lhs1}, {2,Lhs2}, ...] and get element from Rhs
-    LhsPairs = lists:zip(lists:seq(1, length(LhsElements)),
-                      LhsElements),
-    %% check that Rhs is a tuple
-    Block1 = emit(Block0, [
-        e4_f:unless(
-            [e4_f:retrieve(Rhs),
-             e4_f:lit(length(LhsElements)),
-             <<".IS-TUPLE">>],
-            e4_f:block([<<"ERROR-BADARG">>])
-        )
-    ]),
-    %% For all variables in the left introduce a variable and create
-    %% variable assignment
-    lists:foldl(
-        fun({Index, Lhs1}, Blk0) ->
-            Blk1 = emit(Blk0, [
-                e4_f:mark_new_var(Lhs1),
-                <<"DUP">>,
-                e4_f:element(Index, #f_stacktop{})
-            ]),
-            pattern_match_var_versus(Blk1, Lhs1, #f_stacktop{})
-        end,
-        emit(Block1, [e4_f:retrieve(Rhs)]),
-        LhsPairs).
-%%pattern_match_tuple_versus(_State, _Lhs, Rhs) ->
-%%    compile_error("E4Cerl: Match tuple vs ~9999p is not implemented", [Rhs]).
-
 get_code(#f_mod_pass1{code=Code}) -> Code.
 
 i(I) -> lists:duplicate((I-1) * 4, 32).
@@ -359,20 +170,20 @@ format_core_forth(C, Indent) ->
 format_op(#f_apply{funobj=FO, args=Args}) ->
     io_lib:format("~s(~s;~s)", [color:whiteb("apply"), format_op(FO),
                                 [format_op(A) || A <- Args]]);
-format_op(#f_var{name=V}) -> color:blueb(str(V));
+format_op(#k_var{name=V}) -> color:blueb(str(V));
 format_op(W) when is_atom(W) ->
     io_lib:format("~s", [color:whiteb(str(W))]);
 format_op(W) when ?IS_FORTH_WORD(W) ->
     io_lib:format("~s", [color:whiteb(str(W))]);
-format_op(#f_lit{val=L}) ->
+format_op(#k_literal{val=L}) ->
     io_lib:format("'~s", [color:magenta(str(L))]);
 format_op(#f_ld{var=V}) ->
     io_lib:format("~s(~s)", [color:green("retrieve"), format_op(V)]);
-format_op(#f_st{var=#f_var{name=V}}) ->
+format_op(#f_st{var=#k_var{name=V}}) ->
     io_lib:format("~s(~s)", [color:red("store"), format_op(V)]);
-format_op(#f_decl_var{var=#f_var{name=V}}) ->
+format_op(#f_decl_var{var=#k_var{name=V}}) ->
     io_lib:format("~s(~s)", [color:blackb("var"), format_op(V)]);
-format_op(#f_decl_arg{var=#f_var{name=V}}) ->
+format_op(#f_decl_arg{var=#k_var{name=V}}) ->
     io_lib:format("~s(~s)", [color:blackb("arg"), format_op(V)]);
 format_op(#f_var_alias{var=V, existing=Alt}) ->
     io_lib:format("~s(~s=~s)", [
@@ -391,7 +202,7 @@ format_op(#f_mfa{mod=M, fn=F, arity=A}) ->
                   ]);
 format_op(#f_include{filename=F}) ->
     io_lib:format("~s(~s)", [color:whiteb("include"), F]);
-format_op(#f_var{}=Var) ->
+format_op(#k_var{} = Var) ->
     io_lib:format("~s", [format_op(Var)]).
 
 str(X) when is_atom(X) -> atom_to_list(X);
@@ -399,16 +210,3 @@ str(X) when is_binary(X) -> io_lib:format("~s", [X]);
 str({A, B}) when is_atom(A), is_integer(B) ->
     io_lib:format("~s/~p", [A, B]);
 str(X) -> lists:flatten(io_lib:format("~p", [X])).
-
-scope_add_var(Block = #f_block{scope=Scope}, Var) ->
-    Block#f_block{scope=ordsets:add_element(Var, Scope)}.
-
-format_vars(#c_values{es=Vars}) -> format_vars(Vars);
-format_vars(Vars) ->
-    Names = lists:map(
-        fun(#f_var{name=N}) -> atom_to_list(N);
-           (#c_var{name=N}) -> atom_to_list(N);
-            (#f_stacktop{}) -> "$stack-top"
-        end,
-        Vars),
-    string:join(Names, ", ").

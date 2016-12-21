@@ -47,11 +47,9 @@
 -type k_guard_break() :: #k_guard_break{}.
 -type k_return() :: #k_return{}.
 
--type k_ast_element() :: #c_literal{} | #c_alias{} | #c_apply{} | #c_binary{}
-    | #c_bitstr{} | #c_call{} | #c_case{} | #c_catch{} | #c_clause{}
-    | #c_cons{} | #c_fun{} | #c_let{} | #c_letrec{} | #c_map{} | #c_map_pair{}
-    | #c_module{} | #c_primop{} | #c_receive{} | #c_seq{} | #c_try{}
-    | #c_tuple{} | #c_values{} | #c_var{}.
+-type k_ast_element() ::
+    k_literal() | k_int() | k_atom() | k_float() | k_binary() | k_nil()
+    .
 -type k_ast() :: k_ast_element() | [k_ast_element()].
 
 -endif. % E4_KERNEL_ERLANG_HRL
