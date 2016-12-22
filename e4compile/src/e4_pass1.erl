@@ -134,7 +134,13 @@ process_match_block(Block0, Context, #k_type_clause{type=Type, values=Values}) -
         [e4_f:comment("begin type clause")],
         [],
         [e4_f:comment("end type clause")]),
-    Type1 = process_match_block(Type0, Context, Values),
+    %% TODO: Check Context var type
+%%    Type1 = lists:foldl(
+%%        fun(V, Block) ->
+%%            emit(Block, [e4_f:eval(V), <<".IS-TUPLE">>])
+%%        end,
+%%        Context#match_ctx.vars),
+    Type2 = process_match_block(Type1, Context, Values),
     emit(Block0, Type1);
 
 process_match_block(Block0, _Context, #k_val_clause{val=Val, body=Body}) ->
@@ -143,6 +149,8 @@ process_match_block(Block0, _Context, #k_val_clause{val=Val, body=Body}) ->
         [e4_f:comment("begin val clause")],
         [],
         [e4_f:comment("end val clause")]),
+    %% TODO: introduce free variables
+    %% TODO: add comparisons for bound variables
     Val1 = process_code(Val0, Body),
     emit(Block0, Val1);
 

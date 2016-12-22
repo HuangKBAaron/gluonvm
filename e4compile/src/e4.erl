@@ -41,7 +41,7 @@ arguments_loop([F | Tail]) ->
                fun() -> e4_compiler:process(F) end),
         arguments_loop(Tail)
     catch throw:compile_failed ->
-        io:format("~s~n", [color:yellow("E4: Compilation failed")])
+        io:format("~s - ~s~n", [color:yellow("E4: Compilation failed"), F])
     end.
 
 try_do(What, Fun) ->
