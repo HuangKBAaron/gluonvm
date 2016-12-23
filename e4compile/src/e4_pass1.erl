@@ -89,7 +89,10 @@ process_code(_Block, X) ->
 %%% Compiling nested match + alt + select + type_/val_clause code structure
 %%%
 
--record(match_ctx, {vars = [] :: [k_var()]}).
+-record(match_ctx, {
+    vars = [] :: [k_var()],
+    type :: k_tuple | k_atom | k_int
+}).
 -type match_ctx() :: #match_ctx{}.
 -type match_elem_group() :: k_match() | k_alt() | k_select() | k_type_clause()
     | k_val_clause() | k_seq() | list().
@@ -101,7 +104,7 @@ process_match_block(Block0, '_', #k_match{vars=Vars, body=Body, ret=Ret}) ->
         [e4_f:comment("begin match")],
         [],
         [e4_f:comment("end match")]),
-    Match1 = process_match_block(Match0, Vars, Body),
+    Match1 = process_match_block(Match0, #match_ctx{vars=Vars}, Body),
     Match2 = emit(Match1, [e4_f:store(Ret)]),
     emit(Block0, Match2);
 
@@ -128,22 +131,16 @@ process_match_block(Block0, Context, #k_select{var=Var, types=Types}) ->
     Select1 = process_match_block(Select0, Context, Types),
     emit(Block0, Select1);
 
-process_match_block(Block0, Context, #k_type_clause{type=Type, values=Values}) ->
+process_match_block(Block0, Context = #match_ctx{},
+                    #k_type_clause{type=Type, values=Values}) ->
     io:format("k_type_clause t=~p~n  val=~p~n", [Type, Values]),
-    Type0 = e4_f:block(
-        [e4_f:comment("begin type clause")],
-        [],
-        [e4_f:comment("end type clause")]),
-    %% TODO: Check Context var type
-%%    Type1 = lists:foldl(
-%%        fun(V, Block) ->
-%%            emit(Block, [e4_f:eval(V), <<".IS-TUPLE">>])
-%%        end,
-%%        Context#match_ctx.vars),
-    Type2 = process_match_block(Type1, Context, Values),
+    Type0 = match_if_type(Type, Context),
+    Context1 = Context#match_ctx{type = Type},
+    Type1 = process_match_block(Type0, Context1, Values),
     emit(Block0, Type1);
 
-process_match_block(Block0, _Context, #k_val_clause{val=Val, body=Body}) ->
+process_match_block(Block0, Context = #match_ctx{},
+                    #k_val_clause{val=Val, body=Body}) ->
     io:format("k_val_clause val=~p~n  body=~p~n", [Val, Body]),
     Val0 = e4_f:block(
         [e4_f:comment("begin val clause")],
@@ -242,3 +239,23 @@ str(X) when is_binary(X) -> io_lib:format("~s", [X]);
 str({A, B}) when is_atom(A), is_integer(B) ->
     io_lib:format("~s/~p", [A, B]);
 str(X) -> lists:flatten(io_lib:format("~p", [X])).
+
+%% @doc Create an IF block which checks if Context variable(s) are a Type
+match_if_type(Type, Context = #match_ctx{}) ->
+    lists:foldl(
+        fun(V, Block) ->
+            New = e4_f:'if'(
+                [e4_f:eval(V), make_type_check(Type)],
+                e4_f:block()
+            ),
+            case Block of % IF may become its own root block or be nested
+                undefined -> New;
+                _ -> emit(Block, New)
+            end
+        end,
+        undefined,
+        Context#match_ctx.vars
+    ).
+
+make_type_check(k_atom) -> <<".IS-ATOM">>;
+make_type_check(k_tuple) -> <<".IS-TUPLE">>.

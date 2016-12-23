@@ -36,7 +36,7 @@
     block(
         [comment("begin if"), Cond, <<"IF">>],
         [Body],
-        [<<"THEN">>]
+        [<<"THEN">>, comment("end if")]
     ).
 
 'if'(Cond, Body = #f_block{}, Else = #f_block{}) ->
