@@ -36,7 +36,7 @@ process_op(A) when ?IS_FORTH_WORD(A) -> A; % forth words (as atoms)
 %%process_op(B) when is_binary(B) -> B; % forth words (parsed from disk)
 
 process_op(#k_literal{val=V}) -> f_lit(V);
-process_op(#f_mfa{mod=M, fn=F, arity=A}) ->
+process_op(#k_remote{mod=M, name=F, arity=A}) ->
     [<<".MFA">>, f_lit(M), f_lit(F), f_lit(A)];
 
 process_op(#f_comment{comment=C}) -> []; %['(', C, ')'];

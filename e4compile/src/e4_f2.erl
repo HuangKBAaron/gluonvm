@@ -12,7 +12,7 @@
 
 retrieve(Mod = #f_module{}, #f_ld{var=Var}) ->
     retrieve(Mod, Var);
-retrieve(#f_module{}, #f_mfa{}=MFA) ->
+retrieve(#f_module{}, #k_remote{}=MFA) ->
     MFA;
 retrieve(#f_module{scope=_Scope, alloc_vars=AllocatedVars}, Var) ->
     CfVar = e4_f:var(Var),

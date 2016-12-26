@@ -51,11 +51,12 @@ try_do(What, Fun) ->
             erlang:throw(compile_failed); % chain the error out
         T:Err ->
             io:format("~n~s (~s): ~s~n"
-                      "~s~n",
+                      "~p~n",
                       [color:red("E4: Failed"),
                        color:yellow(What),
                        ?COLOR_TERM(redb, {T, Err}),
-                       ?COLOR_TERM(blackb, erlang:get_stacktrace())
+                       erlang:get_stacktrace()
+                       %?COLOR_TERM(blackb, erlang:get_stacktrace())
                       ]),
             erlang:throw(compile_failed)
     end.

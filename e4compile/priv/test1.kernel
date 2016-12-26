@@ -23,8 +23,8 @@ fdef 'map_1'/2(_cor1, _cor0) =
 	    then
 	    <<_ker6>>
 	type k_atom
-	  'nil' ->
-	    <<'nil'>>
+	  'undefined' ->
+	    <<'undefined'>>
       do
 	[_cor0] >> <_ker0>
       then

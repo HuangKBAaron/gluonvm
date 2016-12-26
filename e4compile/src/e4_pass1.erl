@@ -4,7 +4,7 @@
 
 %% API
 -export([process/1, process_code/2, module_new/0, get_code/1,
-    emit/2, format_core_forth/2]).
+    emit/2]).
 
 -include_lib("compiler/src/core_parse.hrl").
 
@@ -20,14 +20,14 @@ process(#k_mdef{name=Name, exports=_Exps, attributes=_Attr, body=Body}) ->
         [
             e4_f:comment("begin mod"),
             e4_f:include("forth-lib/e4core.fs"),
-            <<"(">>, <<":MODULE">>, atom_to_binary(Name, utf8), <<")">>
+            e4_f:comment("MODULE ~s", [Name])
         ],
         [],
         [e4_f:comment("end mod")]),
     Out = process_code(Block0, Body),
 %%    Out = process_fun_defs(Block, Body),
-    io:format("PASS1~n~p~n", [Out]),
-%%    io:format("PASS1~n~s~n", [format_core_forth(Out, 0)]),
+%%    io:format("PASS1~n~p~n", [Out]),
+    io:format("PASS1~n~s~n", [e4_pass1_print:format_core_forth(Out, 0)]),
     Out.
 
 -spec process_code(f_block(), k_ast()) -> f_block().
@@ -90,7 +90,8 @@ process_code(_Block, X) ->
 %%%
 
 -record(match_ctx, {
-    vars = [] :: [k_var()],
+    match_vars= [] :: [k_var()],    % vars which appeared in #k_match{}
+    select_var,                     % focused var which appeared #k_select{}
     type :: k_tuple | k_atom | k_int
 }).
 -type match_ctx() :: #match_ctx{}.
@@ -100,11 +101,12 @@ process_code(_Block, X) ->
 -spec process_match_block(f_block(), match_ctx() | '_', match_elem_group())
                          -> f_block().
 process_match_block(Block0, '_', #k_match{vars=Vars, body=Body, ret=Ret}) ->
+    io:format("k_match vars=~p~n", [Vars]),
     Match0 = e4_f:block(
         [e4_f:comment("begin match")],
         [],
         [e4_f:comment("end match")]),
-    Match1 = process_match_block(Match0, #match_ctx{vars=Vars}, Body),
+    Match1 = process_match_block(Match0, #match_ctx{match_vars=Vars}, Body),
     Match2 = emit(Match1, [e4_f:store(Ret)]),
     emit(Block0, Match2);
 
@@ -122,13 +124,16 @@ process_match_block(Block0, Context, #k_alt{first=First, then=Then}) ->
     Alt2 = process_match_block(Alt1, Context, Then),
     emit(Block0, Alt2);
 
-process_match_block(Block0, Context, #k_select{var=Var, types=Types}) ->
+process_match_block(Block0, Context0, #k_select{var=Var, types=Types}) ->
     io:format("k_select var=~p~ntypes=~p~n", [Var, Types]),
     Select0 = e4_f:block(
         [e4_f:comment("begin select")],
         [],
         [e4_f:comment("end select")]),
-    Select1 = process_match_block(Select0, Context, Types),
+    %% Update focused select var
+    Context1 = Context0#match_ctx{select_var=Var},
+    %% Go deeper
+    Select1 = process_match_block(Select0, Context1, Types),
     emit(Block0, Select1);
 
 process_match_block(Block0, Context = #match_ctx{},
@@ -139,17 +144,35 @@ process_match_block(Block0, Context = #match_ctx{},
     Type1 = process_match_block(Type0, Context1, Values),
     emit(Block0, Type1);
 
-process_match_block(Block0, Context = #match_ctx{},
-                    #k_val_clause{val=Val, body=Body}) ->
-    io:format("k_val_clause val=~p~n  body=~p~n", [Val, Body]),
-    Val0 = e4_f:block(
+process_match_block(Block0, #match_ctx{select_var=Rhs, type=Type},
+                    #k_val_clause{val=Lhs, body=Body}) ->
+    io:format("k_val_clause lhs=~999p~n"
+              "  rhs=~p~n  body=~p~n", [Lhs, Rhs, Body]),
+    Val00 = e4_f:block(
         [e4_f:comment("begin val clause")],
         [],
         [e4_f:comment("end val clause")]),
+    %% In case RVal is a complex expression, save into tmp variable and emit
+    %% the accompanying code (possibly empty list)
+    {LTmp, LTmpEmit} = e4_f:make_tmp(Block0, Lhs),
+    Val0 = emit(Val00, LTmpEmit),
+
     %% TODO: introduce free variables
     %% TODO: add comparisons for bound variables
+    %% Create a conditional block for pattern match which checks if all
+    %% values on the left match all values on the right.
+    io:format("~s(~999p,~n  ~999p,~n  ~999p)",
+              [color:green("before: make_match"), Type, LTmp, Rhs]),
+    MatchBlock = emit_match(Type, LTmp, Rhs),
+
+    %% Process body of the clause
     Val1 = process_code(Val0, Body),
-    emit(Block0, Val1);
+
+    %% Insert processed code into match condition block
+    MatchBlock1 = emit(MatchBlock, Val1),
+
+    %% Now insert match condition block into the parent block
+    emit(Block0, MatchBlock1);
 
 process_match_block(Block0, _Context, #k_seq{}=Seq) ->
     process_code(Block0, Seq);
@@ -168,9 +191,9 @@ eval_args(Block, Args) ->
     ).
 
 -spec emit(Block :: f_block(), Code :: intermediate_forth_code()) -> f_block().
-emit(Block, AddCode) when not is_list(AddCode) ->
+emit(Block = #f_block{}, AddCode) when not is_list(AddCode) ->
     emit(Block, [AddCode]);
-emit(Block, AddCode) ->
+emit(Block = #f_block{}, AddCode) ->
     lists:foldl(
         fun(Nested, Blk) when is_list(Nested) ->
                 emit(Blk, Nested);
@@ -181,81 +204,49 @@ emit(Block, AddCode) ->
         AddCode).
 
 format_fun_name(Name, Arity) ->
-    #f_mfa{mod='.', fn=Name, arity=Arity}.
+    #k_remote{mod='.', name=Name, arity=Arity}.
 
 get_code(#f_mod_pass1{code=Code}) -> Code.
 
-i(I) -> lists:duplicate((I-1) * 4, 32).
-
-format_core_forth(L, Indent) when is_list(L) ->
-    [format_core_forth(Item, Indent) || Item <- L];
-format_core_forth(#f_block{before=B, scope=_S, code=C, 'after'=A}, Indent) ->
-    [format_core_forth(B, Indent+1),
-     format_core_forth(C, Indent+1),
-     format_core_forth(A, Indent+1)];
-format_core_forth(C, Indent) ->
-    io_lib:format("~s~s~n", [i(Indent), format_op(C)]).
-
-format_op(#f_apply{funobj=FO, args=Args}) ->
-    io_lib:format("~s(~s;~s)", [color:whiteb("apply"), format_op(FO),
-                                [format_op(A) || A <- Args]]);
-format_op(#k_var{name=V}) -> color:blueb(str(V));
-format_op(W) when is_atom(W) ->
-    io_lib:format("~s", [color:whiteb(str(W))]);
-format_op(W) when ?IS_FORTH_WORD(W) ->
-    io_lib:format("~s", [color:whiteb(str(W))]);
-format_op(#k_literal{val=L}) ->
-    io_lib:format("'~s", [color:magenta(str(L))]);
-format_op(#f_ld{var=V}) ->
-    io_lib:format("~s(~s)", [color:green("retrieve"), format_op(V)]);
-format_op(#f_st{var=#k_var{name=V}}) ->
-    io_lib:format("~s(~s)", [color:red("store"), format_op(V)]);
-format_op(#f_decl_var{var=#k_var{name=V}}) ->
-    io_lib:format("~s(~s)", [color:blackb("var"), format_op(V)]);
-format_op(#f_decl_arg{var=#k_var{name=V}}) ->
-    io_lib:format("~s(~s)", [color:blackb("arg"), format_op(V)]);
-format_op(#f_var_alias{var=V, existing=Alt}) ->
-    io_lib:format("~s(~s=~s)", [
-        color:blackb("alias"), format_op(V), format_op(Alt)]);
-format_op(#f_comment{comment=C}) ->
-    io_lib:format("~s ~s",
-                  [color:blackb("\\"), color:blackb(C)]);
-format_op(#f_mfa{mod=M, fn=F, arity=A}) ->
-    io_lib:format("~s~s,~s,~s~s",
-                  [
-                      color:magentab("MFA("),
-                      format_op(M),
-                      format_op(F),
-                      str(A),
-                      color:magentab(")")
-                  ]);
-format_op(#f_include{filename=F}) ->
-    io_lib:format("~s(~s)", [color:whiteb("include"), F]);
-format_op(#k_var{} = Var) ->
-    io_lib:format("~s", [format_op(Var)]).
-
-str(X) when is_atom(X) -> atom_to_list(X);
-str(X) when is_binary(X) -> io_lib:format("~s", [X]);
-str({A, B}) when is_atom(A), is_integer(B) ->
-    io_lib:format("~s/~p", [A, B]);
-str(X) -> lists:flatten(io_lib:format("~p", [X])).
-
 %% @doc Create an IF block which checks if Context variable(s) are a Type
 match_if_type(Type, Context = #match_ctx{}) ->
-    lists:foldl(
-        fun(V, Block) ->
-            New = e4_f:'if'(
-                [e4_f:eval(V), make_type_check(Type)],
-                e4_f:block()
-            ),
-            case Block of % IF may become its own root block or be nested
-                undefined -> New;
-                _ -> emit(Block, New)
-            end
-        end,
-        undefined,
-        Context#match_ctx.vars
+    e4_f:'if'(
+        [e4_f:eval(Context#match_ctx.select_var),
+         make_type_check(Type)],
+        e4_f:block()
     ).
 
 make_type_check(k_atom) -> <<".IS-ATOM">>;
 make_type_check(k_tuple) -> <<".IS-TUPLE">>.
+
+%% @doc Create a conditional block for pattern match which checks if all
+%% values on the left match all values on the right.
+%% Code should be inserted inside this block by the caller.
+emit_match(k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
+    %% Assuming Rhs is also a tuple, take elements from it and match against
+    %% each of the LhsElements. Create new variables as needed.
+    RhsElements = lists:map(
+        fun(I) ->
+            %% TODO: Push Rhs and dup for each get-element or something?
+            %% Naive approach is to retrieve it every time
+            [e4_f:eval(Rhs), e4_f:lit(I), <<".GET-ELEMENT">>]
+        end,
+        lists:seq(1, length(LhsElements))
+    ),
+    VarPairs = lists:zip(LhsElements, RhsElements),
+    io:format("~s pairs ~p~n", [color:green("make_match"), VarPairs]),
+    lists:foldl(
+        fun({Lhs1, Rhs1}, Block0) ->
+            emit(Block0, e4_f:equals(Lhs1, Rhs1))
+        end,
+        e4_f:block(),
+        VarPairs
+    );
+emit_match(_, #k_var{} = L, #k_var{} = R) ->
+    e4_f:block(
+        e4_f:equals(e4_f:eval(L), e4_f:eval(R))
+    );
+emit_match(k_atom, [LhsVar], Rhs) ->
+    e4_f:block(
+        e4_f:equals(e4_f:eval(LhsVar), e4_f:eval(Rhs))
+    ).

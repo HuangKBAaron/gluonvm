@@ -9,8 +9,8 @@
 
 -include("e4_kernel_erl.hrl").
 
--record(f_mfa, {mod :: atom(), fn :: atom(), arity :: integer()}).
--type cf_mfa() :: #f_mfa{}.
+%%-record(f_mfa, {mod :: atom(), fn :: atom(), arity :: integer()}).
+%%-type cf_mfa() :: #f_mfa{}.
 
 %%-record(k_literal, {val :: any()}).
 %%-type k_literal() :: #k_literal{}.
@@ -104,8 +104,8 @@
 -define(IS_FORTH_WORD(X), is_binary(X)).
 
 -type intermediate_forth_op() ::
-    forth_word() | f_comment() | k_literal() | f_block() | cf_mfa() | f_decl_var()
-    | f_decl_arg() | f_ld() | f_st() | f_enter() | f_leave().
+    forth_word() | f_comment() | k_literal() | f_block() | k_remote()
+    | f_decl_var() | f_decl_arg() | f_ld() | f_st() | f_enter() | f_leave().
 -type intermediate_forth_code() :: intermediate_forth_op()
     | [intermediate_forth_op()] | [intermediate_forth_code()].
 

@@ -75,7 +75,7 @@ process_op(Mod0 = #f_module{}, #f_decl_arg{var=V}) ->
     declare_arg(Mod0, V);
 process_op(Mod0 = #f_module{}, #f_comment{} = C) ->
     emit(Mod0, C);
-process_op(Mod0 = #f_module{}, #f_mfa{} = MFA) ->
+process_op(Mod0 = #f_module{}, #k_remote{} = MFA) ->
     emit(Mod0, MFA);
 process_op(Mod0 = #f_module{}, #f_ld{var=V}) ->
     emit(Mod0, e4_f2:retrieve(Mod0, V));

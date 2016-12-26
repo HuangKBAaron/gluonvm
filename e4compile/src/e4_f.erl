@@ -5,14 +5,41 @@
     'and'/1, 'if'/2, 'if'/3, block/0, block/1, block/3, block/4, comment/1,
     comment/2, equals/2, lit/1, match_two_values/2, nil/0, eval/1,
     store/1, tuple/1, var/1, element/2, unless/2, mark_alias/2,
-    mark_new_var/1, mark_new_arg/1, make_mfarity/3, primop/2, include/1
+    mark_new_var/1, mark_new_arg/1, make_mfarity/3, primop/2, include/1,
+    make_tmp/2
 ]).
 
 -include_lib("compiler/src/core_parse.hrl").
 -include("e4_forth.hrl").
 -include("e4.hrl").
 
-%% Takes list of Forth checks and creates forth instructions which produce
+%% @doc Checks if expr is a simple variable or literal, then returns itself.
+%% Creates a tmp variable and assigns the value of Expr to it
+make_tmp(Block = #f_block{}, Value) ->
+    %% If Value is fully known inside the block we can replace with a temporary
+    case e4_helper:can_be_calculated(Block, Value) of
+        true  -> make_tmp(Value); % has only known vars, literals or calls
+        false -> {Value, []}      % value cannot be bound to a temporary
+    end.
+
+%%make_tmp(#k_var{}=Var)      -> {Var, []};
+%%make_tmp(#k_literal{}=Lit)  -> {Lit, []};
+%%make_tmp(#k_int{}=Lit)      -> {Lit, []};
+%%make_tmp(#k_atom{}=Lit)     -> {Lit, []};
+%%make_tmp(#k_float{}=Lit)    -> {Lit, []};
+make_tmp(Value) ->
+    %% Remove 4 bytes "#Ref" from "#Ref<0.0.2.60>" and prepend "forth"
+    <<_:4/binary, TmpName0/binary>> = erlang:list_to_binary(
+        erlang:ref_to_list(make_ref())
+    ),
+    TmpName = <<"forth", TmpName0/binary>>,
+
+    Tmp = var(TmpName),
+    TmpCode = [mark_new_var(Tmp), Value, store(Tmp)],
+    {Tmp, TmpCode}.
+
+
+%% @doc Takes list of Forth checks and creates forth instructions which produce
 %% true if all conditions are true. Assumption: each Cond in Conds is a Forth
 %% sequence which leaves one value on stack
 'and'([]) -> [];
@@ -104,7 +131,8 @@ block(Before, Code, After) ->
 block(Before, Code, After, Scope) ->
     #f_block{before=Before, code=Code, 'after'=After, scope=Scope}.
 
-%% ( X -- , stores value X on stack into variable Dst )
+%% @doc Emit a structure which later will produce code to store value into
+%% the variable, allocated somewhere on the stack
 store([]) -> []; % for where empty ret=[] is provided
 store([Dst = #k_var{}]) -> #f_st{var=Dst};
 store(Dst = #k_var{}) -> #f_st{var=Dst}.
@@ -130,7 +158,7 @@ eval(#f_stacktop{}) -> [];
 eval(Retr = #f_ld{}) -> Retr;
 
 eval(#k_var{name={F, A}}) when is_atom(F), is_integer(A) ->
-    #f_mfa{mod='.', fn=F, arity=A};
+    #k_remote{mod='.', name=F, arity=A};
 eval(#k_var{name=Var}) ->
     #f_ld{var=Var};
 
@@ -146,6 +174,7 @@ eval(Var = #k_var{}) -> #f_ld{var=Var}.
 
 var(#c_var{name=Name}) -> #k_var{name=Name};
 var(#k_var{} = CF) -> CF;
+var(Name) when is_binary(Name) -> #k_var{name=Name};
 var(Name) when is_atom(Name) -> #k_var{name=Name}.
 
 mark_new_var(#c_var{}=V) -> #f_decl_var{var=var(V)};
@@ -158,7 +187,7 @@ element(Index, Tuple) ->
     [eval(Tuple), eval(Index), <<".GET-ELEMENT">>].
 
 make_mfarity(M, F, Arity) when is_atom(F), is_atom(F) ->
-    #f_mfa{mod=M, fn=F, arity=Arity};
+    #k_remote{mod=M, name=F, arity=Arity};
 make_mfarity(MExpr, FExpr, Arity) ->
     [MExpr, FExpr, lit(Arity), <<".MAKE-MFARITY">>].
 
