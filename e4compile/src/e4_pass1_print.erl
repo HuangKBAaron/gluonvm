@@ -25,12 +25,18 @@ format_op(W) when is_atom(W) ->
     io_lib:format("~s", [color:whiteb(str(W))]);
 format_op(W) when ?IS_FORTH_WORD(W) ->
     io_lib:format("~s", [color:whiteb(str(W))]);
+
 format_op(#k_nil{}) ->
     io_lib:format("lit:[]", []);
 format_op(#k_literal{val=L}) ->
     io_lib:format("lit:~s", [color:magenta(str(L))]);
 format_op(#k_atom{val=A}) ->
     io_lib:format("atom:~s", [color:white(str(A))]);
+format_op(#k_int{val=A}) ->
+    io_lib:format("int:~s", [color:redb(str(A))]);
+format_op(#k_float{val=A}) ->
+    io_lib:format("float:~s", [color:magentab(str(A))]);
+
 format_op(#f_ld{var=V}) ->
     io_lib:format("~s(~s)", [color:green("retrieve"), format_op(V)]);
 format_op(#f_st{var=#k_var{name=V}}) ->

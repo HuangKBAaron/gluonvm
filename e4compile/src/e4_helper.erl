@@ -13,13 +13,17 @@
 %% and (free) unbound variables. Having a known or dynamic value allows
 %% binding it to a temporary before some other calculation.
 -spec can_be_calculated(f_block(), any()) -> boolean().
+can_be_calculated(Block, Elements) when is_list(Elements) ->
+    lists:all(fun(E) -> can_be_calculated(Block, E) end,
+              Elements);
 can_be_calculated(_Block, #k_literal{}) -> true;
 can_be_calculated(_Block, #k_int{})     -> true;
 can_be_calculated(_Block, #k_float{})   -> true;
 can_be_calculated(_Block, #k_atom{})    -> true;
 can_be_calculated(Block = #f_block{}, #k_tuple{es=Elements}) ->
-    lists:all(fun(E) -> can_be_calculated(Block, E) end,
-              Elements);
+    can_be_calculated(Block, Elements);
+can_be_calculated(Block = #f_block{}, #f_block{code=Code}) ->
+    can_be_calculated(Block, Code);
 can_be_calculated(#f_block{scope=Scope}, #k_var{} = Var) ->
     scope_has(Scope, Var).
 
