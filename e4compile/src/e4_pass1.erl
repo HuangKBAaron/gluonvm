@@ -25,8 +25,6 @@ process(#k_mdef{name=Name, exports=_Exps, attributes=_Attr, body=Body}) ->
         [],
         [e4_f:comment("end mod")]),
     Out = process_code(Block0, Body),
-%%    Out = process_fun_defs(Block, Body),
-%%    io:format("PASS1~n~p~n", [Out]),
     io:format("PASS1~n~s~n", [e4_pass1_print:format_core_forth(Out, 0)]),
     Out.
 
@@ -74,7 +72,7 @@ process_code(Block0, #k_enter{op=Op, args=Args}) ->
 process_code(Block0, #k_call{op=Op, args=Args, ret=Ret}) ->
     io:format("k_call op=~p~n  args=~p~n  ret=~p~n", [Op, Args, Ret]),
     Block1 = eval_args(Block0, Args),
-    Block2 = emit(Block1, [Op, <<"CALL">>]),
+    Block2 = emit(Block1, [e4_f:eval(Op), <<"CALL">>]),
     emit(Block2, e4_f:store(Ret));
 
 process_code(Block0, #k_put{arg=Arg, ret=Ret}) ->
@@ -157,13 +155,11 @@ process_match_block(Block0, #match_ctx{select_var=Rhs, type=Type},
     {LTmp, LTmpEmit} = e4_f:make_tmp(Block0, Lhs),
     Val0 = emit(Val00, LTmpEmit),
 
-    %% TODO: introduce free variables
-    %% TODO: add comparisons for bound variables
     %% Create a conditional block for pattern match which checks if all
     %% values on the left match all values on the right.
-    io:format("~s(~999p,~n  ~999p,~n  ~999p)",
-              [color:green("before: make_match"), Type, LTmp, Rhs]),
-    MatchBlock = emit_match(Type, LTmp, Rhs),
+%%    io:format("~s(~999p,~n  ~999p,~n  ~999p)",
+%%              [color:green("before: make_match"), Type, LTmp, Rhs]),
+    MatchBlock = emit_match(Block0#f_block.scope, Type, LTmp, Rhs),
 
     %% Process body of the clause
     Val1 = process_code(Val0, Body),
@@ -194,14 +190,14 @@ eval_args(Block, Args) ->
 emit(Block = #f_block{}, AddCode) when not is_list(AddCode) ->
     emit(Block, [AddCode]);
 emit(Block = #f_block{}, AddCode) ->
-    lists:foldl(
-        fun(Nested, Blk) when is_list(Nested) ->
-                emit(Blk, Nested);
-            (ForthOp, Blk = #f_block{code=Code}) ->
-                Blk#f_block{code=Code ++ [ForthOp]}
-        end,
-        Block,
-        AddCode).
+    lists:foldl(fun emit_x_into_y/2, Block, AddCode).
+
+emit_x_into_y(#k_var{}, _Blk) ->
+    ?COMPILE_ERROR("should not emit variable");
+emit_x_into_y(Nested, Blk) when is_list(Nested) ->
+    emit(Blk, Nested);
+emit_x_into_y(ForthOp, Blk = #f_block{code=Code}) ->
+    Blk#f_block{code=Code ++ [ForthOp]}.
 
 format_fun_name(Name, Arity) ->
     #k_remote{mod='.', name=Name, arity=Arity}.
@@ -222,7 +218,7 @@ make_type_check(k_tuple) -> <<".IS-TUPLE">>.
 %% @doc Create a conditional block for pattern match which checks if all
 %% values on the left match all values on the right.
 %% Code should be inserted inside this block by the caller.
-emit_match(k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
+emit_match(Scope, k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
     %% Assuming Rhs is also a tuple, take elements from it and match against
     %% each of the LhsElements. Create new variables as needed.
     RhsElements = lists:map(
@@ -234,19 +230,30 @@ emit_match(k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
         lists:seq(1, length(LhsElements))
     ),
     VarPairs = lists:zip(LhsElements, RhsElements),
-    io:format("~s pairs ~p~n", [color:green("make_match"), VarPairs]),
-    lists:foldl(
+
+    %% Now partition a list of [{L,R}, ... ] pairs into such, where L is
+    %% known and can be compared and other, where L is an unbound name and
+    %% will always match, producing a bound variable.
+    PartitionFun = fun({L, _R}) -> e4_helper:scope_has(Scope, L) end,
+    {ComparePairs, AssignPairs} = lists:partition(PartitionFun, VarPairs),
+
+    %% Dump out the comparison-matching code
+    Block0 = lists:foldl(
         fun({Lhs1, Rhs1}, Block0) ->
             emit(Block0, e4_f:equals(Lhs1, Rhs1))
         end,
         e4_f:block(),
-        VarPairs
+        ComparePairs
+    ),
+    %% Dump out the assigning code
+    lists:foldl(
+        fun({Lhs1, Rhs1}, Block0) ->
+            emit(Block0, [e4_f:eval(Rhs1), e4_f:store(Lhs1)])
+        end,
+        e4_f:block(),
+        AssignPairs
     );
-emit_match(_, #k_var{} = L, #k_var{} = R) ->
-    e4_f:block(
-        e4_f:equals(e4_f:eval(L), e4_f:eval(R))
-    );
-emit_match(k_atom, [LhsVar], Rhs) ->
-    e4_f:block(
-        e4_f:equals(e4_f:eval(LhsVar), e4_f:eval(Rhs))
-    ).
+emit_match(_Scope, _, #k_var{} = L, #k_var{} = R) ->
+    e4_f:block(e4_f:equals(L, R));
+emit_match(_Scope, k_atom, [LhsVar], Rhs) ->
+    e4_f:block(e4_f:equals(LhsVar, Rhs)).

@@ -3,8 +3,8 @@
 :NIF .NONVALUE? -2
 :NIF .MAKE-MFARITY -3
 
-:NIF .ENTER -10
-:NIF .LEAVE -11
+:NIF .ENTER -10 ( TODO: maybe allocate frame on dynamic heap? )
+:NIF .LEAVE -11 ( TODO: if on dynamic heap maybe just let GC take it )
 :NIF .LD -12
 :NIF .ST -13
 :NIF .APPLY -14

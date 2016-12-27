@@ -18,6 +18,8 @@ process(Forth) ->
 %%    io:format("~s~n~s~n", [color:redb("PASS4 OPT#1"), Output2]),
     Output.
 
+%% TODO store(x) + retrieve(x) maybe add a custom opcode to write without consuming stack
+
 optimize_code(Code, []) -> lists:flatten(lists:reverse(Code));
 optimize_code(Code, [E1, <<".ENTER">>, E2, <<".ENTER">> | Tail])
     when is_integer(E1), is_integer(E2) ->

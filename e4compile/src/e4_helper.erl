@@ -3,7 +3,7 @@
 -module(e4_helper).
 
 %% API
--export([can_be_calculated/2]).
+-export([can_be_calculated/2, scope_has/2]).
 
 -include("e4_forth.hrl").
 -include("e4.hrl").

@@ -22,11 +22,6 @@ make_tmp(Block = #f_block{}, Value) ->
         false -> {Value, []}      % value cannot be bound to a temporary
     end.
 
-%%make_tmp(#k_var{}=Var)      -> {Var, []};
-%%make_tmp(#k_literal{}=Lit)  -> {Lit, []};
-%%make_tmp(#k_int{}=Lit)      -> {Lit, []};
-%%make_tmp(#k_atom{}=Lit)     -> {Lit, []};
-%%make_tmp(#k_float{}=Lit)    -> {Lit, []};
 make_tmp(Value) ->
     %% Remove 4 bytes "#Ref" from "#Ref<0.0.2.60>" and prepend "forth"
     <<_:4/binary, TmpName0/binary>> = erlang:list_to_binary(
@@ -94,7 +89,8 @@ tuple(Values) ->
 cons(H, T) -> [eval(H), eval(T), <<".CONS">>].
 
 %% ( X Y -- (X==Y) , takes 2 values from stack, pushes comparison result )
-equals(Lhs, Rhs) -> [Lhs, Rhs, <<"==">>].
+equals(Lhs, Rhs) ->
+    [eval(Lhs), eval(Rhs), <<"==">>].
 
 %% ( X Y -- X , if X==Y, otherwise badmatch error )
 match_two_values(L, R) ->
@@ -146,36 +142,29 @@ mark_alias(Existing = #k_var{}, #f_stacktop{}) ->
 
 %% @doc Produce code which will evaluate or retrieve variable value and leave
 %% it on stack for the code that follows.
-%%eval(#c_tuple{es=Es}) -> tuple(Es);
-%%eval(#c_apply{op=FunObj, args=Args}) ->
-%%    #f_apply{
-%%        funobj=eval(FunObj),
-%%        args=lists:map(fun eval/1, Args)
-%%    };
-%%eval(#f_apply{} = A) -> A;
-%%eval(I) when is_integer(I) -> lit(I);
-eval(#f_stacktop{}) -> [];
-eval(Retr = #f_ld{}) -> Retr;
-
-eval(#k_var{name={F, A}}) when is_atom(F), is_integer(A) ->
-    #k_remote{mod='.', name=F, arity=A};
-eval(#k_var{name=Var}) ->
-    #f_ld{var=Var};
-
+eval(#f_stacktop{})         -> [];
+eval(Retr = #f_ld{})        -> Retr;
+eval(#k_var{name={F, A}})
+    when is_atom(F), is_integer(A) ->
+        #k_remote{mod='.', name=F, arity=A};
+eval(#k_var{name=Var})      -> #f_ld{var=Var};
 eval(#k_tuple{es=Elements}) -> tuple(Elements);
-eval(#k_cons{hd=H, tl=T}) -> cons(H, T);
+eval(#k_cons{hd=H, tl=T})   -> cons(H, T);
+
+eval(Lit = #k_local{}) -> Lit;  % local fun-arity
+eval(Lit = #k_remote{}) -> Lit; % external mod-fun-arity
 eval(Lit = #k_literal{}) -> Lit;
 eval(Lit = #k_atom{}) -> Lit;
 eval(Lit = #k_float{}) -> Lit;
 eval(Lit = #k_int{}) -> Lit;
 eval(Lit = #k_nil{}) -> Lit;
+eval(Var = #k_var{}) -> #f_ld{var=Var};
 
-eval(Var = #k_var{}) -> #f_ld{var=Var}.
+eval(Code) when is_list(Code) -> Code.
 
-var(#c_var{name=Name}) -> #k_var{name=Name};
-var(#k_var{} = CF) -> CF;
-var(Name) when is_binary(Name) -> #k_var{name=Name};
-var(Name) when is_atom(Name) -> #k_var{name=Name}.
+var(#k_var{name=Name})          -> var(Name);
+var(Name) when is_binary(Name)  -> #k_var{name=Name};
+var(Name) when is_atom(Name)    -> #k_var{name=atom_to_binary(Name, utf8)}.
 
 mark_new_var(#c_var{}=V) -> #f_decl_var{var=var(V)};
 mark_new_var(#k_var{} = V) -> #f_decl_var{var=var(V)};

@@ -21,9 +21,6 @@ format_core_forth(C, Indent) ->
 format_op(#f_apply{funobj=FO, args=Args}) ->
     io_lib:format("~s(~s;~s)", [color:whiteb("apply"), format_op(FO),
                                 [format_op(A) || A <- Args]]);
-format_op(#k_var{name=V}) -> color:blueb(str(V));
-format_op(#k_local{name=N, arity=A}) ->
-    io_lib:format("local ~s/~p", [color:whiteb(str(N)), A]);
 format_op(W) when is_atom(W) ->
     io_lib:format("~s", [color:whiteb(str(W))]);
 format_op(W) when ?IS_FORTH_WORD(W) ->
@@ -48,18 +45,16 @@ format_op(#f_var_alias{var=V, existing=Alt}) ->
 format_op(#f_comment{comment=C}) ->
     io_lib:format("~s ~s",
                   [color:blackb("\\"), color:blackb(C)]);
+format_op(#k_local{name=N, arity=A}) ->
+    io_lib:format("funarity:~s/~p", [color:whiteb(str(N)), A]);
 format_op(#k_remote{mod=M, name=F, arity=A}) ->
-    io_lib:format("~s~s,~s,~s",
-                  [
-                      color:magentab("mfa:"),
-                      format_op(M),
-                      format_op(F),
-                      str(A)
-                  ]);
+    io_lib:format("mfarity:~s,~s,~s", [format_op(M), format_op(F), str(A)]);
 format_op(#f_include{filename=F}) ->
     io_lib:format("~s(~s)", [color:whiteb("include"), F]);
-format_op(#k_var{} = Var) ->
-    io_lib:format("~s", [format_op(Var)]).
+%%format_op(#k_var{} = Var) ->
+%%    io_lib:format("~s", [format_op(Var)]).
+format_op(Other) ->
+    ?COMPILE_ERROR("format_op: unknown ~p", [Other]).
 
 str(X) when is_atom(X) -> atom_to_list(X);
 str(X) when is_binary(X) -> io_lib:format("~s", [X]);
