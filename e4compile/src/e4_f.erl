@@ -175,7 +175,9 @@ mark_new_arg(#k_var{} = V) -> #f_decl_arg{var=var(V)}.
 element(Index, Tuple) ->
     [eval(Tuple), eval(Index), <<".GET-ELEMENT">>].
 
-make_mfarity(M, F, Arity) when is_atom(F), is_atom(F) ->
+make_mfarity('.', F, Arity) when is_atom(F) ->
+    #k_local{name=F, arity=Arity};
+make_mfarity(M, F, Arity) when is_atom(M), is_atom(F) ->
     #k_remote{mod=M, name=F, arity=Arity};
 make_mfarity(MExpr, FExpr, Arity) ->
     [MExpr, FExpr, lit(Arity), <<".MAKE-MFARITY">>].

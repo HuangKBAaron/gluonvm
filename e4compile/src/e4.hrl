@@ -13,6 +13,6 @@
         erlang:error(compile_error)
     end).
 
--define(COLOR_TERM(Color, T), color:Color(io_lib:format("~9999p", [T]))).
+-define(COLOR_TERM(Color, T), color:Color(io_lib:format("~n~p", [T]))).
 
 -endif. % E4_HRL

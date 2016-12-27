@@ -36,7 +36,7 @@ process_code(Block0, [CoreOp | Tail]) ->
 
 process_code(ParentBlock,
              #k_fdef{func=Name, arity=Arity, vars=Vars, body=Body}) ->
-    io:format("k_fdef name=~s vars~p~n", [Name, Vars]),
+%%    io:format("k_fdef name=~s vars~p~n", [Name, Vars]),
     Block1 = e4_f:block(
         [<<":">>, format_fun_name(Name, Arity)],
         [],
@@ -53,6 +53,7 @@ process_code(ParentBlock,
 %%    emit(Block0, e4_f:eval(Var));
 
 process_code(Block0, KM = #k_match{}) -> process_match_block(Block0, '_', KM);
+process_code(Block0, #k_guard{clauses=C}) -> process_guard_block(Block0, C);
 
 process_code(Block0, #k_seq{arg=Arg, body=Body}) ->
     io:format("k_seq arg=~p~n  body=~p~n", [Arg, Body]),
@@ -79,12 +80,40 @@ process_code(Block0, #k_put{arg=Arg, ret=Ret}) ->
     io:format("k_put arg=~p ret=~p~n", [Arg, Ret]),
     emit(Block0, [e4_f:eval(Arg), e4_f:store(Ret)]);
 
+%% TODO: maybe merge process_guard_block with process_code
+process_code(Block0, #k_alt{} = Alt) ->
+    process_alt_block(Block0, Alt, fun process_code/2);
+
 process_code(_Block, X) ->
     ?COMPILE_ERROR("E4Cerl: Unknown Core AST piece ~s~n",
                    [?COLOR_TERM(red, X)]).
 
 %%%
+%%% K_Guard block with nested k_guard_clause's
+%%%
+
+process_guard_block(Block0, []) -> Block0;
+process_guard_block(Block0, [#k_alt{}=Alt | Tail]) ->
+    Block1 = process_alt_block(Block0, Alt, fun process_guard_block/2),
+    process_guard_block(Block1, Tail);
+process_guard_block(Block0, [#k_guard_clause{guard=G, body=Body} | Tail]) ->
+    process_guard_block(Block0, Tail).
+
+%% @doc Processes #k_alt{} block and calls given function to proceed recursing
+process_alt_block(Block0, #k_alt{first=First, then=Then}, RecurseFun) ->
+%%    io:format("k_alt first=~p~nthen=~p~n", [First, Then]),
+    Alt0 = e4_f:block(
+        [e4_f:comment("begin alt")],
+        [],
+        [e4_f:comment("end alt")]),
+    Alt1 = RecurseFun(Alt0, First),
+    Alt2 = RecurseFun(Alt1, Then),
+    emit(Block0, Alt2).
+
+%%%
 %%% Compiling nested match + alt + select + type_/val_clause code structure
+%%% it is already pre-compiled by kernel Erlang processor, but we still have
+%%% to figure out variables and how they compare and which already exist.
 %%%
 
 -record(match_ctx, {
@@ -112,15 +141,9 @@ process_match_block(Match0, Context, L) when is_list(L) ->
     lists:foldl(fun(El, Match) -> process_match_block(Match, Context, El) end,
         Match0, L);
 
-process_match_block(Block0, Context, #k_alt{first=First, then=Then}) ->
-%%    io:format("k_alt first=~p~nthen=~p~n", [First, Then]),
-    Alt0 = e4_f:block(
-        [e4_f:comment("begin alt")],
-        [],
-        [e4_f:comment("end alt")]),
-    Alt1 = process_match_block(Alt0, Context, First),
-    Alt2 = process_match_block(Alt1, Context, Then),
-    emit(Block0, Alt2);
+process_match_block(Block0, Context, #k_alt{}=Alt) ->
+    process_alt_block(Block0, Alt,
+                      fun(B, Ast) -> process_match_block(B, Context, Ast) end);
 
 process_match_block(Block0, Context0, #k_select{var=Var, types=Types}) ->
     io:format("k_select var=~p~ntypes=~p~n", [Var, Types]),
@@ -142,7 +165,7 @@ process_match_block(Block0, Context = #match_ctx{},
     Type1 = process_match_block(Type0, Context1, Values),
     emit(Block0, Type1);
 
-process_match_block(Block0, #match_ctx{select_var=Rhs, type=Type},
+process_match_block(Block0, #match_ctx{select_var=Rhs, type=Type} = Context,
                     #k_val_clause{val=Lhs, body=Body}) ->
     io:format("k_val_clause lhs=~999p~n"
               "  rhs=~p~n  body=~p~n", [Lhs, Rhs, Body]),
@@ -162,7 +185,8 @@ process_match_block(Block0, #match_ctx{select_var=Rhs, type=Type},
     MatchBlock = emit_match(Block0#f_block.scope, Type, LTmp, Rhs),
 
     %% Process body of the clause
-    Val1 = process_code(Val0, Body),
+%%    Val1 = process_code(Val0, Body),
+    Val1 = process_match_block(Val0, Context, Body),
 
     %% Insert processed code into match condition block
     MatchBlock1 = emit(MatchBlock, Val1),
@@ -170,8 +194,11 @@ process_match_block(Block0, #match_ctx{select_var=Rhs, type=Type},
     %% Now insert match condition block into the parent block
     emit(Block0, MatchBlock1);
 
-process_match_block(Block0, _Context, #k_seq{}=Seq) ->
-    process_code(Block0, Seq);
+process_match_block(Blk, _Co, #k_seq{} = Seq) -> process_code(Blk, Seq);
+process_match_block(Blk, _Co, #k_return{} = R) -> process_code(Blk, R);
+process_match_block(Block0, _Co,
+    %% TODO merge this procesS_match* and process_guard* with process_code()
+                    #k_guard{clauses=C}) -> process_guard_block(Block0, C);
 
 process_match_block(_Block0, Context, Other) ->
     ?COMPILE_ERROR("E4 Pass1: Match block unknown element ~s (context ~s)",
@@ -200,11 +227,13 @@ emit_x_into_y(ForthOp, Blk = #f_block{code=Code}) ->
     Blk#f_block{code=Code ++ [ForthOp]}.
 
 format_fun_name(Name, Arity) ->
-    #k_remote{mod='.', name=Name, arity=Arity}.
+    #k_local{name=Name, arity=Arity}.
 
 get_code(#f_mod_pass1{code=Code}) -> Code.
 
 %% @doc Create an IF block which checks if Context variable(s) are a Type
+match_if_type(k_literal, _Context) ->
+    e4_f:block(); % do nothing just proceed to value clause and compare directly
 match_if_type(Type, Context = #match_ctx{}) ->
     e4_f:'if'(
         [e4_f:eval(Context#match_ctx.select_var),
