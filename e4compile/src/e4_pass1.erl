@@ -199,16 +199,17 @@ process_code(Block0 = #f_block{}, Context = #match_ctx{},
 process_code(Block0 = #f_block{},
              #match_ctx{select_var=Rhs, type=Type} = Context,
              #k_val_clause{val=Lhs, body=Body}) ->
-    io:format("k_val_clause lhs=~999p~n"
-              "  rhs=~p~n  body=~p~n", [Lhs, Rhs, Body]),
-    Val00 = e4_f:block(
+%%    io:format("k_val_clause lhs=~999p~n"
+%%              "  rhs=~p~n  body=~p~n", [Lhs, Rhs, Body]),
+    Val0 = e4_f:block(
         [e4_f:comment("begin val clause")],
         [],
         [e4_f:comment("end val clause")]),
     %% In case RVal is a complex expression, save into tmp variable and emit
     %% the accompanying code (possibly empty list)
+    %% The tmp code is inserted into the outer scope
     {LTmp, LTmpEmit} = e4_f:make_tmp(Block0, Lhs),
-    Val0 = emit(Val00, LTmpEmit),
+    Block1 = emit(Block0, LTmpEmit),
 
     %% Create a conditional block for pattern match which checks if all
     %% values on the left match all values on the right.
@@ -221,7 +222,7 @@ process_code(Block0 = #f_block{},
     MatchBlock1 = emit(MatchBlock, Val1),
 
     %% Now insert match condition block into the parent block
-    emit(Block0, MatchBlock1);
+    emit(Block1, MatchBlock1);
 
 process_code(#f_block{}, #match_ctx{}, X) ->
     ?COMPILE_ERROR("E4Cerl: Unknown Core AST piece ~s~n",
@@ -368,6 +369,11 @@ emit_match(Scope, k_cons, #k_cons{hd=LHead, tl=LTail}, Rhs) ->
                     ])
             end
     end;
+emit_match(_Scope, k_nil, _, R)     -> e4_f:block([e4_f:eval(R), <<".NIL?">>]);
+emit_match(_Scope, k_float, L, R)   -> e4_f:block(e4_f:equals(L, R));
+emit_match(_Scope, k_int, L, R)     -> e4_f:block(e4_f:equals(L, R));
+emit_match(_Scope, k_atom, L, R)    -> e4_f:block(e4_f:equals(L, R));
+emit_match(_Scope, k_literal, L, R) -> e4_f:block(e4_f:equals(L, R));
 emit_match(_Scope, _, #k_var{} = L, #k_var{} = R) ->
     e4_f:block(e4_f:equals(L, R));
 emit_match(_Scope, k_atom, [LhsVar], Rhs) ->

@@ -18,8 +18,8 @@
 make_tmp(Block = #f_block{}, Value) ->
     %% If Value is fully known inside the block we can replace with a temporary
     case e4_helper:is_value_known(Block, Value) of
-        true  -> make_tmp(Value); % has only known vars, literals or calls
-        false -> {Value, []}      % value cannot be bound to a temporary
+        false -> make_tmp(Value); % has only known vars, literals or calls
+        true  -> {Value, []}      % value cannot be bound to a temporary
     end.
 
 make_tmp(Value) ->
@@ -30,7 +30,7 @@ make_tmp(Value) ->
     TmpName = <<"forth", TmpName0/binary>>,
 
     Tmp = var(TmpName),
-    TmpCode = [mark_new_var(Tmp), Value, store(Tmp)],
+    TmpCode = [mark_new_var(Tmp), eval(Value), store(Tmp)],
     {Tmp, TmpCode}.
 
 
@@ -130,13 +130,13 @@ block(Before, Code, After, Scope) ->
 %% @doc Emit a structure which later will produce code to store value into
 %% the variable, allocated somewhere on the stack
 store([]) -> []; % for where empty ret=[] is provided
-store([Dst = #k_var{}]) -> #f_st{var=Dst};
-store(Dst = #k_var{}) -> #f_st{var=Dst}.
+store([Dst = #k_var{}]) -> #f_st{var=var(Dst)};
+store(Dst = #k_var{}) -> #f_st{var=var(Dst)}.
 
 %% @doc If both args are variables, creates an alias for the next compiler
 %% pass and generates no code. Otherwise generates code for copying.
 mark_alias(Var = #k_var{}, Existing = #k_var{}) ->
-    #f_var_alias{var=Var, existing=Existing};
+    #f_var_alias{var=var(Var), existing=Existing};
 mark_alias(Existing = #k_var{}, #f_stacktop{}) ->
     [<<"DUP">>, store(Existing)].
 

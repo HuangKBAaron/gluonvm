@@ -51,14 +51,20 @@ format_op(#f_var_alias{var=V, existing=Alt}) ->
 format_op(#f_comment{comment=C}) ->
     io_lib:format("~s ~s",
                   [color:blackb("\\"), color:blackb(C)]);
+format_op(#k_tuple{es=Elements}) ->
+    Ops = [format_op(E) || E <- Elements],
+%%    Ops1 = [[Op, ", "] || Op <- Ops],
+    Ops1 = string:join(", ", Ops),
+    io_lib:format("tuple:{~s}", [Ops1]);
+format_op(#k_cons{hd=H, tl=T}) ->
+    io_lib:format("cons:[~s | ~s]", [format_op(H), format_op(T)]);
 format_op(#k_local{name=N, arity=A}) ->
     io_lib:format("funarity:~s/~p", [color:whiteb(str(N)), A]);
 format_op(#k_remote{mod=M, name=F, arity=A}) ->
     io_lib:format("mfarity:~s,~s,~s", [format_op(M), format_op(F), str(A)]);
 format_op(#f_include{filename=F}) ->
     io_lib:format("~s(~s)", [color:whiteb("include"), F]);
-%%format_op(#k_var{} = Var) ->
-%%    io_lib:format("~s", [format_op(Var)]).
+format_op(#k_var{name=Var}) -> Var; % binary
 format_op(Other) ->
     ?COMPILE_ERROR("format_op: unknown ~p", [Other]).
 
