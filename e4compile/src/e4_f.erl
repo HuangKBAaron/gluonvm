@@ -17,7 +17,7 @@
 %% Creates a tmp variable and assigns the value of Expr to it
 make_tmp(Block = #f_block{}, Value) ->
     %% If Value is fully known inside the block we can replace with a temporary
-    case e4_helper:can_be_calculated(Block, Value) of
+    case e4_helper:is_value_known(Block, Value) of
         true  -> make_tmp(Value); % has only known vars, literals or calls
         false -> {Value, []}      % value cannot be bound to a temporary
     end.

@@ -83,8 +83,16 @@ process_code(Block0 = #f_block{}, Ctx = #match_ctx{},
         end, Block0, Clauses);
 process_code(Block0 = #f_block{}, Ctx = #match_ctx{},
              #k_guard_clause{guard=G, body=Body}) ->
-    ConditionCode = process_code(e4_f:block(), Ctx, G),
-    BodyCode = process_code(e4_f:block(), Ctx, Body),
+    ConditionCode = process_code(
+        e4_f:block([e4_f:comment("begin guard cond")],
+                   [],
+                   [e4_f:comment("end guard cond")]),
+        Ctx, G),
+    BodyCode = process_code(
+        e4_f:block([e4_f:comment("begin guard body")],
+                   [],
+                   [e4_f:comment("end guard body")]),
+        Ctx, Body),
     emit(Block0, e4_f:'if'(ConditionCode, BodyCode));
 %%
 %% end guards
@@ -191,8 +199,8 @@ process_code(Block0 = #f_block{}, Context = #match_ctx{},
 process_code(Block0 = #f_block{},
              #match_ctx{select_var=Rhs, type=Type} = Context,
              #k_val_clause{val=Lhs, body=Body}) ->
-%%    io:format("k_val_clause lhs=~999p~n"
-%%              "  rhs=~p~n  body=~p~n", [Lhs, Rhs, Body]),
+    io:format("k_val_clause lhs=~999p~n"
+              "  rhs=~p~n  body=~p~n", [Lhs, Rhs, Body]),
     Val00 = e4_f:block(
         [e4_f:comment("begin val clause")],
         [],
@@ -251,14 +259,15 @@ match_if_type(k_literal, _Context) ->
     e4_f:block(); % do nothing just proceed to value clause and compare directly
 match_if_type(Type, Context = #match_ctx{}) ->
     e4_f:'if'(
-        [e4_f:eval(Context#match_ctx.select_var),
-         make_type_check(Type)],
+        [e4_f:eval(Context#match_ctx.select_var), make_type_check(Type)],
         e4_f:block()
     ).
 
-make_type_check(k_nil) -> <<".NIL?">>;
-make_type_check(k_atom) -> <<".ATOM?">>;
-make_type_check(k_tuple) -> <<".TUPLE?">>.
+make_type_check(k_nil)      -> <<".NIL?">>;
+make_type_check(k_int)      -> <<".INT?">>;
+make_type_check(k_cons)     -> <<".CONS?">>;
+make_type_check(k_atom)     -> <<".ATOM?">>;
+make_type_check(k_tuple)    -> <<".TUPLE?">>.
 
 %% @doc Create a conditional block for pattern match which checks if all
 %% values on the left match all values on the right.
@@ -268,8 +277,8 @@ emit_match(Scope, k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
     %% each of the LhsElements. Create new variables as needed.
     RhsElements = lists:map(
         fun(I) ->
-            %% TODO: Push Rhs and dup for each get-element or something?
-            %% Naive approach is to retrieve it every time
+            %% Naive approach is to retrieve it every time. Rhs is a temporary
+            %% for non trivial expressions so it should be fast enough
             [e4_f:eval(Rhs), e4_f:lit(I), <<".GET-ELEMENT">>]
         end,
         lists:seq(1, length(LhsElements))
@@ -279,7 +288,7 @@ emit_match(Scope, k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
     %% Now partition a list of [{L,R}, ... ] pairs into such, where L is
     %% known and can be compared and other, where L is an unbound name and
     %% will always match, producing a bound variable.
-    PartitionFun = fun({L, _R}) -> e4_helper:scope_has(Scope, L) end,
+    PartitionFun = fun({L, _R}) -> e4_helper:is_in_the_scope(Scope, L) end,
     {ComparePairs, AssignPairs} = lists:partition(PartitionFun, VarPairs),
 
     %% Dump out the comparison-matching code
@@ -287,7 +296,7 @@ emit_match(Scope, k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
         fun({Lhs1, Rhs1}, Block0) ->
             emit(Block0, e4_f:equals(Lhs1, Rhs1))
         end,
-        e4_f:block(),
+        e4_f:block([e4_f:comment("emit_match todo IF here")]),
         ComparePairs
     ),
     %% Dump out the assigning code
@@ -298,6 +307,67 @@ emit_match(Scope, k_tuple, #k_tuple{es=LhsElements}, Rhs) ->
         Block0,
         AssignPairs
     );
+emit_match(Scope, k_cons, #k_cons{hd=LHead, tl=LTail}, Rhs) ->
+    %% Assuming Rhs is also a cons, take [H|T] from it and match against
+    %% left Head and Tail. Create new variables as needed.
+
+%%    RhsElements = lists:map(
+%%        fun(I) ->
+%%            %% TODO: Push Rhs and dup for each get-element or something?
+%%            %% Naive approach is to retrieve it every time
+%%            [e4_f:eval(Rhs), <<".DECONS">>]
+%%        end,
+%%        lists:seq(1, length(LhsElements))
+%%    ),
+%%    VarPairs = lists:zip(LhsElements, RhsElements),
+
+    LHeadExists = e4_helper:is_in_the_scope(Scope, LHead),
+    LTailExists = e4_helper:is_in_the_scope(Scope, LTail),
+    case LHeadExists of
+        true ->
+            case LTailExists of
+                true ->
+                    %% Both [LH|LT] on the left exist, we just compare
+                    %% them with [RH|RT] and join with &&
+                    e4_f:'if'([
+                        e4_f:eval(Rhs), <<".DECONS">>, % [H|T] -- H T
+                        e4_f:eval(LTail), <<"==">>, <<"SWAP">>,
+                        e4_f:eval(LHead), <<"==">>, <<"AND">>
+                    ], []);
+                false ->
+                    %% only LHead exists, so we compare heads and
+                    %% assign RTail to LTail
+                    e4_f:'if'([
+                        e4_f:eval(Rhs), <<".HD">>,
+                        e4_f:eval(LHead), <<"==">>
+                    ], [
+                        e4_f:mark_new_var(LTail),
+                        e4_f:eval(Rhs), <<".TL">>,
+                        e4_f:store(LTail)
+                    ])
+            end;
+        false ->
+            case LTailExists of
+                true ->
+                    e4_f:'if'([
+                        e4_f:eval(Rhs), <<".TL">>,
+                        e4_f:eval(LTail), <<"==">>
+                    ], [
+                        e4_f:mark_new_var(LHead),
+                        e4_f:eval(Rhs), <<".HD">>,
+                        e4_f:store(LHead)
+                    ]);
+                false ->
+                    %% Neither LHead nor LTail exist, so just assign
+                    e4_f:block([
+                        e4_f:eval(Rhs), <<".DECONS">>, % [H|T] -- H T
+                        e4_f:mark_new_var(LTail),
+                        e4_f:store(LTail),
+                        e4_f:mark_new_var(LHead),
+                        e4_f:store(LHead)
+                    ])
+            end
+    end;
 emit_match(_Scope, _, #k_var{} = L, #k_var{} = R) ->
     e4_f:block(e4_f:equals(L, R));
 emit_match(_Scope, k_atom, [LhsVar], Rhs) ->
